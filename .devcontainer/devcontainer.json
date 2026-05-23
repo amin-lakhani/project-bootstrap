@@ -1,0 +1,19 @@
+{
+    "name": "Project Dev Container",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "remoteUser": "vscode",
+    "mounts": [
+        "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,readonly",
+        "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,readonly"
+    ],
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "anthropic.claude-code"
+            ]
+        }
+    },
+    "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && git config --global user.name 'Amin Lakhani' && git config --global user.email '85595676+amin-lakhani@users.noreply.github.com'"
+}
