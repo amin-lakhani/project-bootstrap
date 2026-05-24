@@ -27,25 +27,23 @@ step "1/14: Updating OS packages"
 sudo apt-get update && sudo apt-get upgrade -y
 
 # ----------------------------------------------------------------------------
-# Step 2: Update npm
+# Step 2: Ensure system Node.js + latest npm
 # ----------------------------------------------------------------------------
-step "2/14: Updating npm"
-if ! command -v node &> /dev/null; then
-    info "Node.js not found — installing LTS"
+# Check what sudo sees, not the user's PATH — nvm-managed node lives in
+# ~/.nvm and isn't visible to root, so sudo npm install -g would fail.
+step "2/14: Ensuring system Node.js"
+if ! sudo bash -c 'command -v node && command -v npm' &> /dev/null; then
+    info "System Node.js/npm not found — installing LTS via NodeSource"
     curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash -
     sudo apt-get install -y nodejs
 fi
 sudo npm install -g npm@latest
 
 # ----------------------------------------------------------------------------
-# Step 3: Install Claude Code
+# Step 3: Install Claude Code (npm install -g is idempotent)
 # ----------------------------------------------------------------------------
 step "3/14: Installing Claude Code"
-if ! command -v claude &> /dev/null; then
-    sudo npm install -g @anthropic-ai/claude-code
-else
-    sudo npm update -g @anthropic-ai/claude-code
-fi
+sudo npm install -g @anthropic-ai/claude-code
 success "Claude Code ready"
 
 # ----------------------------------------------------------------------------
