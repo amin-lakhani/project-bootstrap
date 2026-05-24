@@ -29,6 +29,10 @@ ARG USERNAME=vscode
 ARG USER_UID=1000
 ARG USER_GID=$USER_UID
 
+# Ubuntu 24.04+ ships with a default 'ubuntu' user/group at UID/GID 1000.
+# Remove it so we can claim 1000 for vscode (matches host UID for file ownership).
+RUN userdel -r ubuntu 2>/dev/null || true
+
 RUN groupadd --gid $USER_GID $USERNAME && \
     useradd --uid $USER_UID --gid $USER_GID -m -s /bin/bash $USERNAME && \
     echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \

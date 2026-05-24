@@ -11,9 +11,10 @@ Per-project dev container and setup script. Run once per new project to get a fr
 
 ## Use
 
+Replace `my-new-project` once, paste, run:
+
 ```bash
-mkdir my-new-project && cd my-new-project
-curl -fsSL https://raw.githubusercontent.com/amin-lakhani/project-bootstrap/main/init.sh | bash
+PROJECT=my-new-project && mkdir "$PROJECT" && cd "$PROJECT" && curl -fsSL https://raw.githubusercontent.com/amin-lakhani/project-bootstrap/main/init.sh | bash
 ```
 
 The script will:
