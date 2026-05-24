@@ -5,8 +5,9 @@ Per-project dev container and setup scripts. Three entry points, all `curl | bas
 | Script | When to use |
 |---|---|
 | `start.sh` | Starting a **new project** on a machine that's already set up |
-| `init.sh` | Same as above, but you've already created the GitHub repo and folder yourself |
 | `dev-setup.sh` | **Fresh machine** — set up the bootstrap tools themselves (clones `dotfiles` + `project-bootstrap`) |
+
+(`init.sh` is what `start.sh` calls under the hood — don't invoke it directly.)
 
 ## Prerequisites
 
@@ -34,14 +35,6 @@ It will:
    - Wires up git and pulls down anything you uploaded via the web UI
 
 Then open the folder in VS Code and "Reopen in Container."
-
-### Skip the wrapper
-
-If you've already created the GitHub repo and the local folder yourself, run `init.sh` directly from inside the empty folder:
-
-```bash
-PROJECT=my-project && mkdir "$PROJECT" && cd "$PROJECT" && curl -fsSL https://raw.githubusercontent.com/amin-lakhani/project-bootstrap/main/init.sh | bash
-```
 
 ## Setting up a fresh machine
 
