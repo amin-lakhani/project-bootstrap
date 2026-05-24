@@ -296,19 +296,23 @@ else
 fi
 
 PUBKEY="$(cat "${DOTFILES_KEY_PATH}.pub")"
-boxed_print "PUBLIC KEY — copy this if the clipboard didn't grab it" "${PUBKEY}"
+KEY_TITLE="$(hostname) - $(date +%Y-%m-%d)"
 
 # Always walk through registration. If the key is already registered, the
 # user just confirms quickly on the GitHub page (or re-adds idempotently).
 # This avoids the failure mode of "yes it's registered" → SSH test fails.
 
-# Clipboard: report exact outcome so user knows whether to paste manually.
-clip_copy "$PUBKEY"
-case "$CLIP_STATUS" in
-    ok)    success "Public key copied to clipboard." ;;
-    osc52) warn "Public key sent via OSC52 terminal escape — your terminal may or may not have honored it." ;;
-    *)     warn "Couldn't reach any clipboard tool — copy the public key from the box above manually." ;;
-esac
+# Helper to put a value on the clipboard with consistent status messaging.
+copy_and_report() {
+    local label="$1"
+    local value="$2"
+    clip_copy "$value"
+    case "$CLIP_STATUS" in
+        ok)    success "${label} copied to clipboard." ;;
+        osc52) warn "${label} sent via OSC52 terminal escape — your terminal may or may not have honored it." ;;
+        *)     warn "Couldn't reach any clipboard tool — copy the ${label,,} from the box above manually." ;;
+    esac
+}
 
 GITHUB_KEYS_URL="https://github.com/${GH_USER}/dotfiles/settings/keys/new"
 info "Deploy key page: ${GITHUB_KEYS_URL}"
@@ -320,10 +324,25 @@ else
     boxed_print "URL" "${GITHUB_KEYS_URL}"
 fi
 
+# --- Title first (clipboard can only hold one thing at a time, so we sequence
+#     title → user pastes → key → user pastes).
+echo ""
+boxed_print "TITLE — copy this if the clipboard didn't grab it" "${KEY_TITLE}"
+copy_and_report "Title" "$KEY_TITLE"
 echo ""
 info "On the page:"
-echo "  1. Title: e.g. '$(hostname) - $(date +%Y-%m-%d)'"
-echo "  2. Paste the public key (clipboard, or copy from the box above)"
+echo "  1. Paste the title (clipboard) into the 'Title' field"
+echo ""
+prompt "Press Enter once the title is filled in (we'll then copy the public key)..."
+read -r _ < /dev/tty || true
+
+# --- Now the pubkey.
+echo ""
+boxed_print "PUBLIC KEY — copy this if the clipboard didn't grab it" "${PUBKEY}"
+copy_and_report "Public key" "$PUBKEY"
+echo ""
+info "On the page:"
+echo "  2. Paste the public key (clipboard) into the 'Key' field"
 echo "  3. LEAVE 'Allow write access' UNCHECKED (read-only)"
 echo "  4. Click 'Add key' — if the key is already there, GitHub will say so; that's fine"
 echo ""
