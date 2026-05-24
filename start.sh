@@ -122,7 +122,7 @@ echo "  2. Private or Public — your call"
 echo "  3. Do NOT initialize with README, .gitignore, or license"
 echo "  4. Click 'Create repository'"
 echo ""
-info "Tip: use the 'uploading an existing file' link on the new-repo page to add starter files now — init.sh will pull them down at the end."
+info "Tip: upload starter files via GitHub now; init.sh will pull them at the end."
 echo ""
 prompt "Press Enter once the repo exists on GitHub..."
 read -r _ < /dev/tty || true
