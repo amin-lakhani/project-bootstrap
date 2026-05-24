@@ -75,13 +75,18 @@ detect_env() {
 }
 
 # Try every clipboard mechanism we know about, in order of "actually copies to
-# the OS clipboard" → "best-effort terminal escape" → "give up". Logs which
-# path succeeded so future failures are diagnosable.
+# the OS clipboard" → "best-effort terminal escape" → "give up".
+# Reports outcome via the global CLIP_STATUS instead of return codes so callers
+# never trip the ERR trap (some bash builds fire ERR even with set +e).
+# CLIP_STATUS values: "ok" | "osc52" | "none"
+CLIP_STATUS="none"
 clip_copy() {
     local content="$1"
+    CLIP_STATUS="none"
     if command -v clip.exe &> /dev/null; then
         if printf '%s' "$content" | clip.exe 2>/dev/null; then
             debug "clip_copy: used clip.exe"
+            CLIP_STATUS="ok"
             return 0
         fi
         warn "clip.exe present but failed."
@@ -89,43 +94,47 @@ clip_copy() {
     if command -v pbcopy &> /dev/null; then
         if printf '%s' "$content" | pbcopy 2>/dev/null; then
             debug "clip_copy: used pbcopy"
+            CLIP_STATUS="ok"
             return 0
         fi
     fi
     if command -v wl-copy &> /dev/null; then
         if printf '%s' "$content" | wl-copy 2>/dev/null; then
             debug "clip_copy: used wl-copy"
+            CLIP_STATUS="ok"
             return 0
         fi
     fi
     if command -v xclip &> /dev/null; then
         if printf '%s' "$content" | xclip -selection clipboard 2>/dev/null; then
             debug "clip_copy: used xclip"
+            CLIP_STATUS="ok"
             return 0
         fi
     fi
     if command -v xsel &> /dev/null; then
         if printf '%s' "$content" | xsel --clipboard --input 2>/dev/null; then
             debug "clip_copy: used xsel"
+            CLIP_STATUS="ok"
             return 0
         fi
     fi
     # OSC52 terminal escape — works in many modern terminals (VS Code,
-    # Windows Terminal, iTerm2, kitty, tmux 3.3+). Sends the content as a
-    # base64-encoded clipboard set escape sequence; the terminal emulator
-    # decodes it and copies to the OS clipboard. The user usually has to
-    # confirm or have the feature enabled.
-    local b64
-    if b64="$(printf '%s' "$content" | base64 -w0 2>/dev/null)" || \
-       b64="$(printf '%s' "$content" | base64 | tr -d '\n')"; then
+    # Windows Terminal, iTerm2, kitty, tmux 3.3+). Fire-and-forget; we can't
+    # confirm the terminal honored it, only that we emitted it.
+    local b64=""
+    b64="$(printf '%s' "$content" | base64 -w0 2>/dev/null)" \
+        || b64="$(printf '%s' "$content" | base64 | tr -d '\n')" \
+        || b64=""
+    if [[ -n "$b64" ]]; then
         printf '\033]52;c;%s\007' "$b64"
         debug "clip_copy: emitted OSC52 escape (terminal may or may not honor)"
-        # OSC52 is fire-and-forget; we can't tell if it worked. Return 2 to
-        # mean "tried best-effort, can't confirm".
-        return 2
+        CLIP_STATUS="osc52"
+        return 0
     fi
     debug "clip_copy: no clipboard mechanism available"
-    return 1
+    CLIP_STATUS="none"
+    return 0
 }
 
 # Try to open a URL in the user's browser. Returns 0 only when we have
@@ -300,23 +309,17 @@ fi
 
 if [[ "$SKIP_KEY_REG" == "0" ]]; then
     # Clipboard: report exact outcome so user knows whether to paste manually.
-    set +e
     clip_copy "$PUBKEY"
-    clip_status=$?
-    set -e
-    case "$clip_status" in
-        0) success "Public key copied to clipboard." ;;
-        2) warn "Public key sent via OSC52 terminal escape — your terminal may or may not have honored it." ;;
-        *) warn "Couldn't reach any clipboard tool — copy the public key from the box above manually." ;;
+    case "$CLIP_STATUS" in
+        ok)    success "Public key copied to clipboard." ;;
+        osc52) warn "Public key sent via OSC52 terminal escape — your terminal may or may not have honored it." ;;
+        *)     warn "Couldn't reach any clipboard tool — copy the public key from the box above manually." ;;
     esac
 
     GITHUB_KEYS_URL="https://github.com/${GH_USER}/dotfiles/settings/keys/new"
     info "Deploy key page: ${GITHUB_KEYS_URL}"
-    set +e
-    open_url "$GITHUB_KEYS_URL"
-    open_status=$?
-    set -e
-    if [[ "$open_status" == "0" ]]; then
+    # open_url uses `if` so its non-zero return is safe re: ERR trap.
+    if open_url "$GITHUB_KEYS_URL"; then
         success "Tried to open browser. If nothing happened, use the URL above (in VS Code's terminal, Ctrl+Click on the URL works)."
     else
         warn "No browser-opener was available. Open this URL manually:"
@@ -411,14 +414,11 @@ echo "Next steps:"
 echo "  1. Open project-bootstrap in VS Code: ${NEXT_CMD}"
 echo "  2. Or work on dotfiles:                (cd ${WORK_DIR}/dotfiles && code .)"
 echo ""
-set +e
 clip_copy "$NEXT_CMD"
-final_clip_status=$?
-set -e
-case "$final_clip_status" in
-    0) info "Step 1 command copied to clipboard — just paste in your shell." ;;
-    2) info "Step 1 command sent via OSC52 — may need to be copied manually." ;;
-    *) info "No clipboard available — copy the command from above." ;;
+case "$CLIP_STATUS" in
+    ok)    info "Step 1 command copied to clipboard — just paste in your shell." ;;
+    osc52) info "Step 1 command sent via OSC52 — may need to be copied manually." ;;
+    *)     info "No clipboard available — copy the command from above." ;;
 esac
 
 info "Log file: ${LOG_FILE}"
