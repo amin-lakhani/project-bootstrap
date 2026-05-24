@@ -293,7 +293,7 @@ fi
 echo ""
 success "Bootstrap complete!"
 echo ""
-NEXT_CMD="cd ${PROJECT_NAME} && code ."
+NEXT_CMD="(cd $(pwd) && code .)"
 echo "Next steps:"
 echo "  1. Open in VS Code:                 ${NEXT_CMD}"
 echo "  2. Command palette → 'Dev Containers: Reopen in Container'"
