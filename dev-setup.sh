@@ -11,11 +11,15 @@ set -euo pipefail
 # ============================================================================
 
 GH_USER="amin-lakhani"
-DOTFILES_REPO="git@github.com:${GH_USER}/dotfiles.git"
-BOOTSTRAP_REPO="git@github.com:${GH_USER}/project-bootstrap.git"
 DEFAULT_FOLDER="dev"
-SSH_KEY_PATH="${HOME}/.ssh/id_ed25519"
 GIT_EMAIL="85595676+${GH_USER}@users.noreply.github.com"
+
+# Dotfiles is private — needs a per-repo read-only deploy key (scoped, no
+# broad account access). project-bootstrap is public — anon HTTPS works.
+DOTFILES_KEY_PATH="${HOME}/.ssh/dotfiles_ed25519"
+DOTFILES_SSH_HOST="github.com-dotfiles"
+DOTFILES_REPO="git@${DOTFILES_SSH_HOST}:${GH_USER}/dotfiles.git"
+BOOTSTRAP_REPO="https://github.com/${GH_USER}/project-bootstrap.git"
 
 CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'
 BLUE='\033[34m'; MAGENTA='\033[35m'; NC='\033[0m'
@@ -112,38 +116,54 @@ fi
 [[ "$NEEDS_MKDIR" == "1" ]] && mkdir -p "$WORK_DIR"
 success "Work directory: ${WORK_DIR}"
 
-# ----- Step 2: ensure a user-account SSH key exists ------------------------
-step "User-account SSH key"
+# ----- Step 2: read-only deploy key scoped to dotfiles ----------------------
+step "Deploy key for dotfiles (read-only, repo-scoped)"
 echo ""
-echo "This step sets up a USER-ACCOUNT SSH key (not a per-project deploy key)."
-echo "It's used to clone + push your personal repos (dotfiles, project-bootstrap)."
+echo "This sets up a READ-ONLY DEPLOY KEY scoped to just the dotfiles repo."
+echo "Not a user-account key — no broad access to any of your other repos."
+echo "(project-bootstrap is public, so it doesn't need any key.)"
 echo ""
+
 KEY_ALREADY_EXISTED=0
-if [[ -f "$SSH_KEY_PATH" ]]; then
-    info "Existing key found at ${SSH_KEY_PATH} — reusing."
+if [[ -f "$DOTFILES_KEY_PATH" ]]; then
+    info "Existing dotfiles key found at ${DOTFILES_KEY_PATH} — reusing."
     KEY_ALREADY_EXISTED=1
 else
     mkdir -p "${HOME}/.ssh"
     chmod 700 "${HOME}/.ssh"
-    ssh-keygen -t ed25519 -C "${GIT_EMAIL} (user account)" -f "$SSH_KEY_PATH" -N ""
-    success "Key generated at ${SSH_KEY_PATH}"
+    ssh-keygen -t ed25519 -C "${GIT_EMAIL} (dotfiles read-only deploy key)" -f "$DOTFILES_KEY_PATH" -N ""
+    success "Key generated at ${DOTFILES_KEY_PATH}"
 fi
 
-PUBKEY="$(cat "${SSH_KEY_PATH}.pub")"
+# SSH config alias so 'git@github.com-dotfiles:...' uses this key.
+SSH_CONFIG="${HOME}/.ssh/config"
+touch "$SSH_CONFIG"
+chmod 600 "$SSH_CONFIG"
+if ! grep -q "^Host ${DOTFILES_SSH_HOST}$" "$SSH_CONFIG"; then
+    {
+        echo ""
+        echo "# Added by project-bootstrap/dev-setup.sh — read-only key for dotfiles"
+        echo "Host ${DOTFILES_SSH_HOST}"
+        echo "    HostName github.com"
+        echo "    User git"
+        echo "    IdentityFile ${DOTFILES_KEY_PATH}"
+        echo "    IdentitiesOnly yes"
+    } >> "$SSH_CONFIG"
+    success "Added SSH config alias '${DOTFILES_SSH_HOST}'"
+else
+    info "SSH config alias '${DOTFILES_SSH_HOST}' already present — skipping."
+fi
+
+PUBKEY="$(cat "${DOTFILES_KEY_PATH}.pub")"
 echo ""
 echo "Public key:"
 echo "  ${PUBKEY}"
 echo ""
 
 if [[ "$KEY_ALREADY_EXISTED" == "1" ]]; then
-    prompt "If this key is already registered on GitHub, press Enter. Otherwise type 'add' to walk through registration:"
+    prompt "If this key is already registered as a deploy key on dotfiles, press Enter. Otherwise type 'add' to walk through registration:"
     read -r add_key_response < /dev/tty || add_key_response=""
-    if [[ "$add_key_response" != "add" ]]; then
-        info "Skipping key registration."
-        SKIP_KEY_REG=1
-    else
-        SKIP_KEY_REG=0
-    fi
+    [[ "$add_key_response" != "add" ]] && SKIP_KEY_REG=1 || SKIP_KEY_REG=0
 else
     SKIP_KEY_REG=0
 fi
@@ -152,7 +172,7 @@ if [[ "$SKIP_KEY_REG" == "0" ]]; then
     if clip_copy "$PUBKEY"; then
         success "Public key copied to clipboard."
     fi
-    GITHUB_KEYS_URL="https://github.com/settings/ssh/new"
+    GITHUB_KEYS_URL="https://github.com/${GH_USER}/dotfiles/settings/keys/new"
     info "Opening: ${GITHUB_KEYS_URL}"
     if open_url "$GITHUB_KEYS_URL"; then
         success "Browser opened."
@@ -161,25 +181,27 @@ if [[ "$SKIP_KEY_REG" == "0" ]]; then
     fi
     echo ""
     info "On the page:"
-    echo "  1. Title: anything, e.g. '$(hostname) - $(date +%Y-%m-%d)'"
-    echo "  2. Key type: Authentication Key"
-    echo "  3. Paste the public key (it's on your clipboard)"
-    echo "  4. Click 'Add SSH key'"
+    echo "  1. Title: e.g. '$(hostname) - $(date +%Y-%m-%d)'"
+    echo "  2. Paste the public key (it's on your clipboard)"
+    echo "  3. LEAVE 'Allow write access' UNCHECKED (read-only)"
+    echo "  4. Click 'Add key'"
     echo ""
     prompt "Press Enter once the key is added on GitHub..."
     read -r _ < /dev/tty || true
 fi
 
-# ----- Step 3: test SSH auth ------------------------------------------------
-step "Verify SSH auth"
-# `ssh -T git@github.com` exits 1 even on success, so capture output.
-ssh_output="$(ssh -T -o StrictHostKeyChecking=accept-new git@github.com 2>&1 || true)"
+# ----- Step 3: test SSH auth for the dotfiles alias ------------------------
+step "Verify SSH auth (via dotfiles alias)"
+# `ssh -T` to GitHub exits 1 even on success; deploy keys authenticate as
+# the repo, not the user, so the message is different ("appears to be a
+# deploy key").
+ssh_output="$(ssh -T -o StrictHostKeyChecking=accept-new "git@${DOTFILES_SSH_HOST}" 2>&1 || true)"
 echo "${ssh_output}"
-if echo "$ssh_output" | grep -q "successfully authenticated"; then
-    success "SSH auth working."
+if echo "$ssh_output" | grep -qiE "successfully authenticated|deploy key|does not provide shell access"; then
+    success "SSH auth working for dotfiles."
 else
     error "SSH auth failed. Key may not be registered yet."
-    error "Re-run after confirming the key is on https://github.com/settings/keys"
+    error "Re-run after adding the key at https://github.com/${GH_USER}/dotfiles/settings/keys"
     exit 1
 fi
 

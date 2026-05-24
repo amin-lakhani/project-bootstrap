@@ -48,8 +48,8 @@ curl -fsSL https://raw.githubusercontent.com/amin-lakhani/project-bootstrap/main
 
 You'll be prompted for:
 - Work directory name under `$HOME` (default: `dev`)
-- SSH key — auto-generated if missing, then walked through GitHub upload
+- A **read-only deploy key** scoped to the dotfiles repo — auto-generated, walked through GitHub upload
 
-When done you'll have `~/<dir>/dotfiles/` and `~/<dir>/project-bootstrap/` ready to edit, plus the symlink that makes Claude Code load this project's synced memory from the dotfiles repo.
+When done you'll have `~/<dir>/dotfiles/` (read-only on this machine) and `~/<dir>/project-bootstrap/` cloned anon (it's public), plus the symlink that makes Claude Code load this project's synced memory from the dotfiles repo.
 
-Note: this is a **user-account** SSH key (`~/.ssh/id_ed25519`), separate from the per-project deploy keys `init.sh` generates for new project repos.
+**Security model:** the deploy key (`~/.ssh/dotfiles_ed25519`) is scoped to just the dotfiles repo and is read-only — no broad account access, no write access to anything. Same principle as `init.sh`'s per-project deploy keys. If you want to edit + push dotfiles from this machine, do it from a primary machine that has push auth set up separately (VS Code OAuth, a write deploy key, etc).
