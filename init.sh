@@ -11,29 +11,70 @@ DOTFILES_REPO="https://github.com/amin-lakhani/dotfiles.git"
 GIT_NAME="Amin Lakhani"
 GIT_EMAIL="85595676+amin-lakhani@users.noreply.github.com"
 
-info()    { echo -e "\033[36m[INFO]\033[0m $1"; }
-success() { echo -e "\033[32m[OK]\033[0m $1"; }
-warn()    { echo -e "\033[33m[WARN]\033[0m $1"; }
-error()   { echo -e "\033[31m[ERROR]\033[0m $1" >&2; }
-step()    { echo ""; echo -e "\033[35m=== $1 ===\033[0m"; }
+# ----- Logging ---------------------------------------------------------------
+# All output tees to a timestamped log file so failures stay diagnosable
+# after the fact. Log helpers prefix each line with their own timestamp;
+# we don't pipe through awk/while-read since that line-buffers interactive
+# prompts (and breaks `read -p`'s newline-less prompt rendering).
+LOG_DIR="${HOME}/.cache/project-bootstrap"
+mkdir -p "$LOG_DIR"
+LOG_FILE="${LOG_DIR}/init-$(date +%Y%m%d-%H%M%S).log"
+# tee -a writes character-by-character so interactive prompts work normally.
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+ts()      { date +%H:%M:%S; }
+info()    { echo -e "\033[90m[$(ts)]\033[0m \033[36m[INFO]\033[0m $1"; }
+success() { echo -e "\033[90m[$(ts)]\033[0m \033[32m[OK]\033[0m $1"; }
+warn()    { echo -e "\033[90m[$(ts)]\033[0m \033[33m[WARN]\033[0m $1"; }
+error()   { echo -e "\033[90m[$(ts)]\033[0m \033[31m[ERROR]\033[0m $1"; }
+step()    { echo ""; echo -e "\033[90m[$(ts)]\033[0m \033[35m=== $1 ===\033[0m"; }
+debug()   { [[ "${DEBUG:-0}" == "1" ]] && echo -e "\033[90m[$(ts)] [DEBUG]\033[0m $1" || true; }
+
+# Trap any unexpected exit and print the line/command that triggered it.
+# Without this, `set -e` makes failures invisible — we'd see step N start
+# then nothing more.
+on_err() {
+    local exit_code=$?
+    local line=$1
+    local cmd=$2
+    echo ""
+    error "FATAL at line ${line}: command \`${cmd}\` exited ${exit_code}"
+    error "See full log: ${LOG_FILE}"
+    exit "$exit_code"
+}
+trap 'on_err $LINENO "$BASH_COMMAND"' ERR
+
+info "Log file: ${LOG_FILE}"
+debug "Set DEBUG=1 before running for extra-verbose tracing"
 
 # Try several browser-opener tools. On WSL without wslview/xdg-open,
 # falls back to cmd.exe which is always present via WSL interop.
 open_url() {
     local url="$1"
     if command -v wslview &> /dev/null; then
-        wslview "$url" < /dev/null > /dev/null 2>&1 && return 0
+        debug "open_url: trying wslview"
+        if wslview "$url" < /dev/null > /dev/null 2>&1; then
+            info "Opened via wslview"
+            return 0
+        fi
     fi
     if command -v xdg-open &> /dev/null; then
-        xdg-open "$url" < /dev/null > /dev/null 2>&1 && return 0
+        debug "open_url: trying xdg-open"
+        if xdg-open "$url" < /dev/null > /dev/null 2>&1; then
+            info "Opened via xdg-open"
+            return 0
+        fi
     fi
     if command -v cmd.exe &> /dev/null; then
+        debug "open_url: trying cmd.exe /c start (backgrounded)"
         # Detach fully: background + nohup so cmd.exe's brief tty grab
         # doesn't break the next interactive read on /dev/tty.
         (cd /mnt/c && nohup cmd.exe /c start "" "$url" < /dev/null > /dev/null 2>&1 &) 2>/dev/null
         sleep 1
+        info "Opened via cmd.exe (Windows interop)"
         return 0
     fi
+    debug "open_url: no opener found"
     return 1
 }
 
@@ -45,12 +86,6 @@ info "Bootstrapping project: $PROJECT_NAME"
 # ----------------------------------------------------------------------------
 step "1/14: Updating OS packages"
 sudo apt-get update && sudo apt-get upgrade -y
-# On WSL, ensure wslu is present so we can open URLs via wslview later.
-# (cmd.exe interop works but can disrupt /dev/tty for subsequent reads.)
-if grep -qi microsoft /proc/version 2>/dev/null && ! command -v wslview &> /dev/null; then
-    info "Installing wslu for reliable browser opening on WSL"
-    sudo apt-get install -y wslu || warn "wslu install failed — will fall back to cmd.exe"
-fi
 
 # ----------------------------------------------------------------------------
 # Step 2: Ensure system Node.js + latest npm
@@ -205,13 +240,17 @@ fi
 # Step 12: Test SSH
 # ----------------------------------------------------------------------------
 step "12/14: Testing SSH connection"
+debug "Running: ssh -T -o StrictHostKeyChecking=accept-new git@${SSH_HOST_ALIAS}"
 SSH_TEST=$(ssh -T -o StrictHostKeyChecking=accept-new "git@${SSH_HOST_ALIAS}" < /dev/null 2>&1 || true)
 echo "$SSH_TEST"
 if echo "$SSH_TEST" | grep -q "successfully authenticated"; then
     success "SSH connection works"
 else
     warn "SSH did not authenticate. Most common cause: deploy key not added on GitHub, or 'Allow write access' wasn't checked."
-    read -p "Continue anyway? [y/N] " -n 1 -r < /dev/tty
+    if ! read -p "Continue anyway? [y/N] " -n 1 -r < /dev/tty; then
+        error "Could not read response; aborting"
+        exit 1
+    fi
     echo
     [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
 fi
@@ -254,4 +293,6 @@ echo "Next steps:"
 echo "  1. Open this folder in VS Code:    code ."
 echo "  2. Command palette → 'Dev Containers: Reopen in Container'"
 echo "  3. Inside the container, run:      claude"
+echo ""
+info "Full log saved to: ${LOG_FILE}"
 echo ""
