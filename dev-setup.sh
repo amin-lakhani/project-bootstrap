@@ -324,25 +324,21 @@ else
     boxed_print "URL" "${GITHUB_KEYS_URL}"
 fi
 
-# --- Title first (clipboard can only hold one thing at a time, so we sequence
-#     title → user pastes → key → user pastes).
+# Copy title then pubkey back-to-back. Both will be in clipboard history (no
+# intermediate prompt). A small sleep between copies so the OS clipboard
+# subsystem registers two distinct events rather than coalescing them.
 echo ""
 boxed_print "TITLE — copy this if the clipboard didn't grab it" "${KEY_TITLE}"
 copy_and_report "Title" "$KEY_TITLE"
-echo ""
-info "On the page:"
-echo "  1. Paste the title (clipboard) into the 'Title' field"
-echo ""
-prompt "Press Enter once the title is filled in (we'll then copy the public key)..."
-read -r _ < /dev/tty || true
-
-# --- Now the pubkey.
+sleep 1
 echo ""
 boxed_print "PUBLIC KEY — copy this if the clipboard didn't grab it" "${PUBKEY}"
 copy_and_report "Public key" "$PUBKEY"
+
 echo ""
-info "On the page:"
-echo "  2. Paste the public key (clipboard) into the 'Key' field"
+info "On the page (both title + key are now in your clipboard history):"
+echo "  1. Paste the TITLE into the 'Title' field"
+echo "  2. Paste the PUBLIC KEY into the 'Key' field"
 echo "  3. LEAVE 'Allow write access' UNCHECKED (read-only)"
 echo "  4. Click 'Add key' — if the key is already there, GitHub will say so; that's fine"
 echo ""
@@ -356,15 +352,29 @@ step "Verify SSH auth (via dotfiles alias)"
 # deploy key" or "does not provide shell access").
 info "Testing: ssh -T -o StrictHostKeyChecking=accept-new git@${DOTFILES_SSH_HOST}"
 
-# Defensive: fully disable both ERR trap and set -e around the ssh call so a
-# weird exit (SIGPIPE, pipefail quirk, etc.) can't silently kill the script.
-# We re-enable both immediately after.
+# Defensive ssh invocation. Three things matter here:
+#   - `< /dev/null`: when running via `curl | bash`, the script's stdin is the
+#     closed curl pipe. Inside $(...), ssh inherits that stdin and on some
+#     setups hangs waiting on it. Explicit /dev/null avoids that entirely.
+#   - `BatchMode=yes`: tells ssh "never prompt interactively" (no passphrase
+#     prompts, no host-key confirmation prompts — we already have
+#     StrictHostKeyChecking=accept-new for that).
+#   - `timeout 30`: hard ceiling so a hung ssh can't silently freeze the
+#     script. If ssh isn't done in 30s, something is broken — surface it.
+# Also disable ERR trap + set -e around the call so weird exits can't kill
+# the script silently.
 trap - ERR
 set +e
-ssh_output="$(ssh -T -o StrictHostKeyChecking=accept-new "git@${DOTFILES_SSH_HOST}" 2>&1)"
+ssh_output="$(timeout 30 ssh -T \
+    -o StrictHostKeyChecking=accept-new \
+    -o BatchMode=yes \
+    "git@${DOTFILES_SSH_HOST}" < /dev/null 2>&1)"
 ssh_exit=$?
 set -e
 trap 'on_err $LINENO "$BASH_COMMAND"' ERR
+if [[ "$ssh_exit" == "124" ]]; then
+    warn "ssh timed out after 30s (timeout exit code 124)."
+fi
 
 info "ssh exit code: ${ssh_exit}"
 info "ssh output (${#ssh_output} bytes):"
