@@ -51,7 +51,7 @@ success "Claude Code ready"
 # ----------------------------------------------------------------------------
 step "4/14: Checking dotfiles"
 if [[ ! -d "${HOME}/.dotfiles" ]]; then
-    read -p "Dotfiles not found at ~/.dotfiles. Clone and install now? [Y/n] " -n 1 -r
+    read -p "Dotfiles not found at ~/.dotfiles. Clone and install now? [Y/n] " -n 1 -r < /dev/tty
     echo
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         git clone "$DOTFILES_REPO" "${HOME}/.dotfiles"
@@ -87,7 +87,7 @@ echo "Accepted formats:"
 echo "  https://github.com/user/repo"
 echo "  https://github.com/user/repo.git"
 echo "  git@github.com:user/repo.git"
-read -p "URL: " REPO_URL
+read -p "URL: " REPO_URL < /dev/tty
 
 if [[ "$REPO_URL" =~ github\.com[:/]([^/]+)/([^/.]+)(\.git)?/?$ ]]; then
     REPO_USER="${BASH_REMATCH[1]}"
@@ -170,7 +170,7 @@ elif command -v xdg-open &> /dev/null; then
     xdg-open "$DEPLOY_KEYS_URL" 2>/dev/null || true
 fi
 
-read -p "Press Enter once BOTH the deploy key is added AND any initial files are uploaded... "
+read -p "Press Enter once BOTH the deploy key is added AND any initial files are uploaded... " < /dev/tty
 
 # ----------------------------------------------------------------------------
 # Step 12: Test SSH
@@ -182,7 +182,7 @@ if echo "$SSH_TEST" | grep -q "successfully authenticated"; then
 else
     warn "SSH test output:"
     echo "$SSH_TEST"
-    read -p "Continue anyway? [y/N] " -n 1 -r
+    read -p "Continue anyway? [y/N] " -n 1 -r < /dev/tty
     echo
     [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
 fi
