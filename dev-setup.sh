@@ -354,21 +354,35 @@ step "Verify SSH auth (via dotfiles alias)"
 # `ssh -T` to GitHub exits 1 even on success; deploy keys authenticate as
 # the repo, not the user, so the message is different ("appears to be a
 # deploy key" or "does not provide shell access").
-info "Running: ssh -T -o StrictHostKeyChecking=accept-new git@${DOTFILES_SSH_HOST}"
-ssh_output="$(ssh -T -v -o StrictHostKeyChecking=accept-new "git@${DOTFILES_SSH_HOST}" 2>&1 || true)"
-# Stash the verbose output only into the log; print the non-verbose summary
-# lines to the user (anything not starting with 'debug1:').
-echo "${ssh_output}" | grep -vE '^debug[0-9]+:|^OpenSSH' || true
-debug "Full ssh -T -v output:"
-debug "$(echo "$ssh_output" | sed 's/^/    /')"
+info "Testing: ssh -T -o StrictHostKeyChecking=accept-new git@${DOTFILES_SSH_HOST}"
+
+# Defensive: fully disable both ERR trap and set -e around the ssh call so a
+# weird exit (SIGPIPE, pipefail quirk, etc.) can't silently kill the script.
+# We re-enable both immediately after.
+trap - ERR
+set +e
+ssh_output="$(ssh -T -o StrictHostKeyChecking=accept-new "git@${DOTFILES_SSH_HOST}" 2>&1)"
+ssh_exit=$?
+set -e
+trap 'on_err $LINENO "$BASH_COMMAND"' ERR
+
+info "ssh exit code: ${ssh_exit}"
+info "ssh output (${#ssh_output} bytes):"
+if [[ -n "$ssh_output" ]]; then
+    echo "$ssh_output" | sed 's/^/    /'
+else
+    warn "(no output captured)"
+fi
+
 if echo "$ssh_output" | grep -qiE "successfully authenticated|deploy key|does not provide shell access"; then
     success "SSH auth working for dotfiles."
 else
-    error "SSH auth failed. Common causes:"
-    error "  - The deploy key wasn't actually added on GitHub (re-check the page)"
-    error "  - GitHub still resolving the key (try waiting 15-30 seconds + re-run)"
-    error "  - Network/firewall blocking SSH on port 22 (try \`ssh -T -p 443 git@ssh.github.com\` to test ssh-over-https)"
-    error "Re-run after fixing, OR add the key at: https://github.com/${GH_USER}/dotfiles/settings/keys"
+    error "SSH auth check did not find a success signature in the output above."
+    error "Common causes:"
+    error "  - Deploy key not actually added on GitHub (recheck the page)"
+    error "  - GitHub still propagating the key (wait 15-30s + re-run)"
+    error "  - Network/firewall blocking SSH on port 22 (try: ssh -T -p 443 git@ssh.github.com)"
+    error "Add key at: https://github.com/${GH_USER}/dotfiles/settings/keys"
     error "Log file: ${LOG_FILE}"
     exit 1
 fi
