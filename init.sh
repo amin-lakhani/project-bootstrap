@@ -151,7 +151,7 @@ echo "Accepted formats:"
 echo "  https://github.com/user/repo"
 echo "  https://github.com/user/repo.git"
 echo "  git@github.com:user/repo.git"
-read -p "URL [Enter for default]: " REPO_URL < /dev/tty
+read -p "URL [Enter for ${DEFAULT_REPO_URL}]: " REPO_URL < /dev/tty
 REPO_URL="${REPO_URL:-$DEFAULT_REPO_URL}"
 
 if [[ "$REPO_URL" =~ github\.com[:/]([^/]+)/([^/.]+)(\.git)?/?$ ]]; then
@@ -293,10 +293,16 @@ fi
 echo ""
 success "Bootstrap complete!"
 echo ""
+NEXT_CMD="cd ${PROJECT_NAME} && code ."
 echo "Next steps:"
-echo "  1. Open this folder in VS Code:    code ."
+echo "  1. Open in VS Code:                 ${NEXT_CMD}"
 echo "  2. Command palette → 'Dev Containers: Reopen in Container'"
-echo "  3. Inside the container, run:      claude"
+echo "  3. Inside the container, run:       claude"
 echo ""
+if command -v clip.exe &> /dev/null; then
+    if echo -n "${NEXT_CMD}" | clip.exe 2>/dev/null; then
+        info "Step 1 command copied to clipboard — just paste in your shell."
+    fi
+fi
 info "Full log saved to: ${LOG_FILE}"
 echo ""
