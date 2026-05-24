@@ -60,14 +60,43 @@ if [[ -z "$project_name" ]]; then
     error "Project name cannot be empty."
     exit 1
 fi
-if [[ ! "$project_name" =~ ^[a-z0-9._-]+$ ]]; then
-    error "Project name must be lowercase letters, digits, dots, dashes, underscores only."
-    error "(GitHub allows uppercase but lowercase keeps URLs and paths predictable.)"
+# Tight regex (first char must be alnum) so 'rm -rf -- "$project_name"' below
+# can never resolve to "." / ".." / "-something".
+if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+    error "Project name must start with a lowercase letter or digit, then only"
+    error "lowercase letters, digits, dots, dashes, underscores."
     exit 1
 fi
+
+# Existing-folder handling: empty → reuse; non-empty → confirm wipe.
+NEEDS_MKDIR=1
 if [[ -e "$project_name" ]]; then
-    error "'$project_name' already exists in $(pwd)."
-    exit 1
+    if [[ ! -d "$project_name" ]]; then
+        error "'$project_name' exists in $(pwd) but isn't a directory. Move it aside and re-run."
+        exit 1
+    fi
+    if [[ -z "$(ls -A "$project_name" 2>/dev/null)" ]]; then
+        info "Folder '${project_name}/' already exists and is empty — reusing it."
+        NEEDS_MKDIR=0
+    else
+        warn "Folder '${project_name}/' already exists and is NOT empty:"
+        ls -A "$project_name" | head -10 | sed 's/^/    /'
+        entry_count=$(ls -A "$project_name" | wc -l)
+        if [[ "$entry_count" -gt 10 ]]; then
+            echo "    ... and $((entry_count - 10)) more"
+        fi
+        echo ""
+        prompt "To wipe and reuse it, re-type the project name. Anything else aborts."
+        read -r confirm < /dev/tty || confirm=""
+        if [[ "$confirm" != "$project_name" ]]; then
+            error "Name didn't match — aborting. No files changed."
+            exit 1
+        fi
+        info "Wiping ${project_name}/ ..."
+        rm -rf -- "$project_name"
+        success "Wiped."
+        NEEDS_MKDIR=1
+    fi
 fi
 
 # ----- Step 2: open GitHub new-repo page with name pre-filled ---------------
@@ -100,11 +129,13 @@ echo ""
 prompt "Press Enter once the repo exists on GitHub..."
 read -r _ < /dev/tty || true
 
-# ----- Step 3: create local folder and hand off to init.sh ------------------
+# ----- Step 3: create local folder (if needed) and hand off to init.sh ------
 step "Bootstrap local project"
-mkdir "$project_name"
+if [[ "$NEEDS_MKDIR" == "1" ]]; then
+    mkdir "$project_name"
+fi
 cd "$project_name"
-success "Created and entered: $(pwd)"
+success "Working in: $(pwd)"
 
 info "Running init.sh..."
 echo ""
