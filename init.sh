@@ -22,14 +22,17 @@ step()    { echo ""; echo -e "\033[35m=== $1 ===\033[0m"; }
 open_url() {
     local url="$1"
     if command -v wslview &> /dev/null; then
-        wslview "$url" 2>/dev/null && return 0
+        wslview "$url" < /dev/null > /dev/null 2>&1 && return 0
     fi
     if command -v xdg-open &> /dev/null; then
-        xdg-open "$url" 2>/dev/null && return 0
+        xdg-open "$url" < /dev/null > /dev/null 2>&1 && return 0
     fi
     if command -v cmd.exe &> /dev/null; then
-        # cd to /mnt/c so cmd.exe has a valid Windows cwd (silences UNC warning)
-        (cd /mnt/c && cmd.exe /c start "" "$url") 2>/dev/null && return 0
+        # Detach fully: background + nohup so cmd.exe's brief tty grab
+        # doesn't break the next interactive read on /dev/tty.
+        (cd /mnt/c && nohup cmd.exe /c start "" "$url" < /dev/null > /dev/null 2>&1 &) 2>/dev/null
+        sleep 1
+        return 0
     fi
     return 1
 }
@@ -42,6 +45,12 @@ info "Bootstrapping project: $PROJECT_NAME"
 # ----------------------------------------------------------------------------
 step "1/14: Updating OS packages"
 sudo apt-get update && sudo apt-get upgrade -y
+# On WSL, ensure wslu is present so we can open URLs via wslview later.
+# (cmd.exe interop works but can disrupt /dev/tty for subsequent reads.)
+if grep -qi microsoft /proc/version 2>/dev/null && ! command -v wslview &> /dev/null; then
+    info "Installing wslu for reliable browser opening on WSL"
+    sudo apt-get install -y wslu || warn "wslu install failed — will fall back to cmd.exe"
+fi
 
 # ----------------------------------------------------------------------------
 # Step 2: Ensure system Node.js + latest npm
@@ -186,7 +195,11 @@ else
     warn "Could not auto-open browser — copy the URL above manually."
 fi
 
-read -p "Press Enter once BOTH the deploy key is added AND any initial files are uploaded... " < /dev/tty
+# Use a tolerant read — if /dev/tty isn't readable (e.g. interop briefly
+# disrupted it), don't crash; just continue. User can re-run if needed.
+if ! read -p "Press Enter once BOTH the deploy key is added AND any initial files are uploaded... " < /dev/tty; then
+    warn "Could not read from terminal; assuming you're ready. Re-run if you need more time."
+fi
 
 # ----------------------------------------------------------------------------
 # Step 12: Test SSH
