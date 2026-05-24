@@ -10,6 +10,7 @@ BOOTSTRAP_RAW="https://raw.githubusercontent.com/amin-lakhani/project-bootstrap/
 DOTFILES_REPO="https://github.com/amin-lakhani/dotfiles.git"
 GIT_NAME="Amin Lakhani"
 GIT_EMAIL="85595676+amin-lakhani@users.noreply.github.com"
+GH_USER="amin-lakhani"
 
 # ----- Logging ---------------------------------------------------------------
 # All output tees to a timestamped log file so failures stay diagnosable
@@ -143,12 +144,15 @@ success "Dev container files copied"
 # Step 7: Get repo URL
 # ----------------------------------------------------------------------------
 step "7/14: Repository setup"
-echo "Paste the GitHub URL of your new (empty) repo."
+DEFAULT_REPO_URL="https://github.com/${GH_USER}/${PROJECT_NAME}"
+echo "Paste the GitHub URL of your new (empty) repo, or press Enter to use:"
+echo "  ${DEFAULT_REPO_URL}"
 echo "Accepted formats:"
 echo "  https://github.com/user/repo"
 echo "  https://github.com/user/repo.git"
 echo "  git@github.com:user/repo.git"
-read -p "URL: " REPO_URL < /dev/tty
+read -p "URL [Enter for default]: " REPO_URL < /dev/tty
+REPO_URL="${REPO_URL:-$DEFAULT_REPO_URL}"
 
 if [[ "$REPO_URL" =~ github\.com[:/]([^/]+)/([^/.]+)(\.git)?/?$ ]]; then
     REPO_USER="${BASH_REMATCH[1]}"
