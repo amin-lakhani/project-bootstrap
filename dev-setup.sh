@@ -298,44 +298,37 @@ fi
 PUBKEY="$(cat "${DOTFILES_KEY_PATH}.pub")"
 boxed_print "PUBLIC KEY — copy this if the clipboard didn't grab it" "${PUBKEY}"
 
-if [[ "$KEY_ALREADY_EXISTED" == "1" ]]; then
-    prompt "If this key is already registered as a deploy key on dotfiles, press Enter. Otherwise type 'add' to walk through registration:"
-    read -r add_key_response < /dev/tty || add_key_response=""
-    [[ "$add_key_response" != "add" ]] && SKIP_KEY_REG=1 || SKIP_KEY_REG=0
-    debug "Key reuse decision: SKIP_KEY_REG=${SKIP_KEY_REG} (response='${add_key_response}')"
+# Always walk through registration. If the key is already registered, the
+# user just confirms quickly on the GitHub page (or re-adds idempotently).
+# This avoids the failure mode of "yes it's registered" → SSH test fails.
+
+# Clipboard: report exact outcome so user knows whether to paste manually.
+clip_copy "$PUBKEY"
+case "$CLIP_STATUS" in
+    ok)    success "Public key copied to clipboard." ;;
+    osc52) warn "Public key sent via OSC52 terminal escape — your terminal may or may not have honored it." ;;
+    *)     warn "Couldn't reach any clipboard tool — copy the public key from the box above manually." ;;
+esac
+
+GITHUB_KEYS_URL="https://github.com/${GH_USER}/dotfiles/settings/keys/new"
+info "Deploy key page: ${GITHUB_KEYS_URL}"
+# open_url uses `if` so its non-zero return is safe re: ERR trap.
+if open_url "$GITHUB_KEYS_URL"; then
+    success "Tried to open browser. If nothing happened, use the URL above (in VS Code's terminal, Ctrl+Click on the URL works)."
 else
-    SKIP_KEY_REG=0
+    warn "No browser-opener was available. Open this URL manually:"
+    boxed_print "URL" "${GITHUB_KEYS_URL}"
 fi
 
-if [[ "$SKIP_KEY_REG" == "0" ]]; then
-    # Clipboard: report exact outcome so user knows whether to paste manually.
-    clip_copy "$PUBKEY"
-    case "$CLIP_STATUS" in
-        ok)    success "Public key copied to clipboard." ;;
-        osc52) warn "Public key sent via OSC52 terminal escape — your terminal may or may not have honored it." ;;
-        *)     warn "Couldn't reach any clipboard tool — copy the public key from the box above manually." ;;
-    esac
-
-    GITHUB_KEYS_URL="https://github.com/${GH_USER}/dotfiles/settings/keys/new"
-    info "Deploy key page: ${GITHUB_KEYS_URL}"
-    # open_url uses `if` so its non-zero return is safe re: ERR trap.
-    if open_url "$GITHUB_KEYS_URL"; then
-        success "Tried to open browser. If nothing happened, use the URL above (in VS Code's terminal, Ctrl+Click on the URL works)."
-    else
-        warn "No browser-opener was available. Open this URL manually:"
-        boxed_print "URL" "${GITHUB_KEYS_URL}"
-    fi
-
-    echo ""
-    info "On the page:"
-    echo "  1. Title: e.g. '$(hostname) - $(date +%Y-%m-%d)'"
-    echo "  2. Paste the public key (clipboard, or copy from the box above)"
-    echo "  3. LEAVE 'Allow write access' UNCHECKED (read-only)"
-    echo "  4. Click 'Add key'"
-    echo ""
-    prompt "Press Enter once the key is added on GitHub..."
-    read -r _ < /dev/tty || true
-fi
+echo ""
+info "On the page:"
+echo "  1. Title: e.g. '$(hostname) - $(date +%Y-%m-%d)'"
+echo "  2. Paste the public key (clipboard, or copy from the box above)"
+echo "  3. LEAVE 'Allow write access' UNCHECKED (read-only)"
+echo "  4. Click 'Add key' — if the key is already there, GitHub will say so; that's fine"
+echo ""
+prompt "Press Enter once the key is added on GitHub..."
+read -r _ < /dev/tty || true
 
 # ----- Step 3: test SSH auth for the dotfiles alias ------------------------
 step "Verify SSH auth (via dotfiles alias)"
