@@ -17,6 +17,23 @@ warn()    { echo -e "\033[33m[WARN]\033[0m $1"; }
 error()   { echo -e "\033[31m[ERROR]\033[0m $1" >&2; }
 step()    { echo ""; echo -e "\033[35m=== $1 ===\033[0m"; }
 
+# Try several browser-opener tools. On WSL without wslview/xdg-open,
+# falls back to cmd.exe which is always present via WSL interop.
+open_url() {
+    local url="$1"
+    if command -v wslview &> /dev/null; then
+        wslview "$url" 2>/dev/null && return 0
+    fi
+    if command -v xdg-open &> /dev/null; then
+        xdg-open "$url" 2>/dev/null && return 0
+    fi
+    if command -v cmd.exe &> /dev/null; then
+        # cd to /mnt/c so cmd.exe has a valid Windows cwd (silences UNC warning)
+        (cd /mnt/c && cmd.exe /c start "" "$url") 2>/dev/null && return 0
+    fi
+    return 1
+}
+
 PROJECT_NAME="$(basename "$(pwd)")"
 info "Bootstrapping project: $PROJECT_NAME"
 
@@ -163,11 +180,10 @@ echo "     - Drag and drop files into the repo"
 echo "     - Commit them via the web UI"
 echo ""
 
-# Try to open browser
-if command -v wslview &> /dev/null; then
-    wslview "$DEPLOY_KEYS_URL" 2>/dev/null || true
-elif command -v xdg-open &> /dev/null; then
-    xdg-open "$DEPLOY_KEYS_URL" 2>/dev/null || true
+if open_url "$DEPLOY_KEYS_URL"; then
+    info "Opened deploy keys page in your browser."
+else
+    warn "Could not auto-open browser — copy the URL above manually."
 fi
 
 read -p "Press Enter once BOTH the deploy key is added AND any initial files are uploaded... " < /dev/tty
@@ -176,12 +192,12 @@ read -p "Press Enter once BOTH the deploy key is added AND any initial files are
 # Step 12: Test SSH
 # ----------------------------------------------------------------------------
 step "12/14: Testing SSH connection"
-SSH_TEST=$(ssh -T -o StrictHostKeyChecking=accept-new "git@${SSH_HOST_ALIAS}" 2>&1 || true)
+SSH_TEST=$(ssh -T -o StrictHostKeyChecking=accept-new "git@${SSH_HOST_ALIAS}" < /dev/null 2>&1 || true)
+echo "$SSH_TEST"
 if echo "$SSH_TEST" | grep -q "successfully authenticated"; then
     success "SSH connection works"
 else
-    warn "SSH test output:"
-    echo "$SSH_TEST"
+    warn "SSH did not authenticate. Most common cause: deploy key not added on GitHub, or 'Allow write access' wasn't checked."
     read -p "Continue anyway? [y/N] " -n 1 -r < /dev/tty
     echo
     [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
