@@ -70,13 +70,7 @@ if [[ -e "$project_name" ]]; then
     exit 1
 fi
 
-# ----- Step 2: create local folder (so user can drop files into it now) -----
-step "Create local folder"
-mkdir "$project_name"
-PROJECT_DIR="$(pwd)/${project_name}"
-success "Created: ${PROJECT_DIR}"
-
-# ----- Step 3: open GitHub new-repo page with name pre-filled ---------------
+# ----- Step 2: open GitHub new-repo page with name pre-filled ---------------
 step "Create the repo on GitHub"
 GITHUB_NEW_URL="https://github.com/new?name=${project_name}"
 
@@ -99,15 +93,19 @@ echo "  2. Private or Public — your call"
 echo "  3. Do NOT initialize with README, .gitignore, or license"
 echo "  4. Click 'Create repository'"
 echo ""
-info "Heads up: while you're doing that, you can also drop any starter"
-info "files into ${PROJECT_DIR}/ — init.sh will commit + push them at the end."
+info "Tip: after the repo is created, GitHub shows an 'uploading an existing file'"
+info "link on the empty-repo page. You can start uploading any starter files there"
+info "while this script keeps running — init.sh pulls them down at the end."
 echo ""
 prompt "Press Enter once the repo exists on GitHub..."
 read -r _ < /dev/tty || true
 
-# ----- Step 4: hand off to init.sh ------------------------------------------
+# ----- Step 3: create local folder and hand off to init.sh ------------------
 step "Bootstrap local project"
+mkdir "$project_name"
 cd "$project_name"
-info "Running init.sh in $(pwd)..."
+success "Created and entered: $(pwd)"
+
+info "Running init.sh..."
 echo ""
 curl -fsSL "${BOOTSTRAP_RAW}/init.sh" | bash
