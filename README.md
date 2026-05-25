@@ -51,7 +51,7 @@ If you forked the bootstrap repos under different names, override these too:
 |---|---|
 | `BOOTSTRAP_REPO_NAME` | `project-bootstrap` |
 | `DOTFILES_REPO_NAME` | `dotfiles` |
-| `BOOTSTRAP_WORK_DIR` | `dev` (used as default folder name under `$HOME` in `dev-setup.sh`) |
+| `BOOTSTRAP_WORK_DIR` | `development` (used as default folder name under `$HOME` in `dev-setup.sh`) |
 
 ## Starting a new project
 
@@ -84,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/<YOUR-GH-USER>/project-bootstrap/ma
 
 You'll be prompted for:
 - Identity (first run only — cached after that; see [Identity](#identity))
-- Work directory name under `$HOME` (default: `dev`, override with `BOOTSTRAP_WORK_DIR`)
+- Work directory name under `$HOME` (default: `development`, override with `BOOTSTRAP_WORK_DIR`)
 - A **read-only deploy key** scoped to the `dotfiles` repo — auto-generated, with title + pubkey copied to your clipboard (back-to-back, both live in clipboard history) and a browser walk-through. The SSH-auth check loops up to 3 times so you can fix a missing key without re-running the whole script.
 
 When done you'll have:
