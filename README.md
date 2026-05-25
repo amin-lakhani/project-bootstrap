@@ -1,6 +1,6 @@
 # project-bootstrap
 
-Per-project dev container and setup scripts. Three entry points, all `curl | bash`:
+Per-project dev container and setup scripts. Two `curl | bash` entry points:
 
 | Script | When to use |
 |---|---|
