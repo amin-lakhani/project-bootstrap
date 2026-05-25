@@ -178,6 +178,8 @@ load_or_prompt_identity() {
         echo "CACHED_GH_USER_ID='${GH_USER_ID}'"
         echo "CACHED_GIT_NAME='${GIT_NAME}'"
         echo "CACHED_GIT_EMAIL='${GIT_EMAIL}'"
+        # Preserve dotfiles-path entry if a prior run recorded one.
+        [[ -n "${CACHED_DOTFILES_PATH:-}" ]] && echo "CACHED_DOTFILES_PATH='${CACHED_DOTFILES_PATH}'"
     } > "$IDENTITY_CACHE"
     chmod 600 "$IDENTITY_CACHE"
 

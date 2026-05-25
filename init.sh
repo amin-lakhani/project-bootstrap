@@ -214,6 +214,10 @@ load_or_prompt_identity() {
         echo "CACHED_GH_USER_ID='${GH_USER_ID}'"
         echo "CACHED_GIT_NAME='${GIT_NAME}'"
         echo "CACHED_GIT_EMAIL='${GIT_EMAIL}'"
+        # Preserve dotfiles-path entry if a prior run (this script or
+        # dev-setup.sh) recorded one. Re-emitting it here keeps the writeback
+        # idempotent without losing other scripts' state.
+        [[ -n "${CACHED_DOTFILES_PATH:-}" ]] && echo "CACHED_DOTFILES_PATH='${CACHED_DOTFILES_PATH}'"
     } > "$IDENTITY_CACHE"
     chmod 600 "$IDENTITY_CACHE"
 
@@ -222,9 +226,8 @@ load_or_prompt_identity() {
 
 load_or_prompt_identity
 
-# Derived URLs (built from resolved identity).
+# Derived URL (built from resolved identity).
 BOOTSTRAP_RAW="https://raw.githubusercontent.com/${GH_USER}/${BOOTSTRAP_REPO_NAME}/main"
-DOTFILES_REPO="https://github.com/${GH_USER}/${DOTFILES_REPO_NAME}.git"
 
 # Try several browser-opener tools. On WSL without wslview/xdg-open,
 # falls back to cmd.exe which is always present via WSL interop.
@@ -254,6 +257,155 @@ open_url() {
         return 0
     fi
     debug "open_url: no opener found"
+    return 1
+}
+
+# Update a single field in the identity cache without disturbing the others.
+# Used when a script learns something new mid-run (e.g. CACHED_DOTFILES_PATH
+# after a successful clone) that load_or_prompt_identity didn't know about.
+update_cache_field() {
+    local name="$1"
+    local value="$2"
+    mkdir -p "$(dirname "$IDENTITY_CACHE")"
+    touch "$IDENTITY_CACHE"
+    chmod 600 "$IDENTITY_CACHE"
+    # Drop any prior entry for this field.
+    if grep -q "^${name}=" "$IDENTITY_CACHE" 2>/dev/null; then
+        sed -i "/^${name}=/d" "$IDENTITY_CACHE"
+    fi
+    echo "${name}='${value}'" >> "$IDENTITY_CACHE"
+}
+
+# Probe SSH auth to the dotfiles-scoped alias. Returns 0 if GitHub recognizes
+# the deploy key. `ssh -T` always exits 1 on github.com, so look for one of
+# the success signatures in the output instead.
+test_dotfiles_ssh() {
+    local ssh_host_alias="github.com-${DOTFILES_REPO_NAME}"
+    local output
+    output="$(timeout 15 ssh -T \
+        -o StrictHostKeyChecking=accept-new \
+        -o BatchMode=yes \
+        "git@${ssh_host_alias}" < /dev/null 2>&1 || true)"
+    debug "test_dotfiles_ssh output: ${output}"
+    echo "$output" | grep -qiE "successfully authenticated|deploy key|does not provide shell access"
+}
+
+# Clone the dotfiles repo into $1. Tries HTTPS (works anonymously for public
+# repos); if that fails, walks the user through generating an SSH deploy key,
+# registering it on GitHub, and retries via the SSH alias.
+#
+# Mirrors dev-setup.sh's deploy-key flow but is intentionally lighter — init.sh
+# is per-project, not per-machine, so a few extra prompts are fine.
+ensure_dotfiles_clone() {
+    local target="$1"
+    local https_url="https://github.com/${GH_USER}/${DOTFILES_REPO_NAME}.git"
+    local ssh_host_alias="github.com-${DOTFILES_REPO_NAME}"
+    local ssh_url="git@${ssh_host_alias}:${GH_USER}/${DOTFILES_REPO_NAME}.git"
+
+    if [[ -d "${target}/.git" ]]; then
+        return 0
+    fi
+
+    info "Attempting anonymous HTTPS clone of ${DOTFILES_REPO_NAME}..."
+    # Run inside an if so a failed clone doesn't trip the ERR trap.
+    if git clone "$https_url" "$target" 2>/dev/null; then
+        success "Cloned via HTTPS."
+        return 0
+    fi
+    warn "HTTPS clone failed — repo is probably private."
+    info "Let's set up an SSH deploy key so we can read it."
+
+    # 1. Generate the key (or reuse).
+    local key_path="${HOME}/.ssh/${DOTFILES_REPO_NAME}_ed25519"
+    mkdir -p "${HOME}/.ssh"
+    chmod 700 "${HOME}/.ssh"
+    if [[ ! -f "$key_path" ]]; then
+        ssh-keygen -t ed25519 \
+            -C "${GIT_EMAIL} (${DOTFILES_REPO_NAME} read-only deploy key)" \
+            -f "$key_path" -N ""
+        success "Generated SSH key at ${key_path}"
+    else
+        info "Reusing existing SSH key at ${key_path}"
+    fi
+
+    # 2. Add the SSH config alias (so the SSH URL picks the right key).
+    local ssh_config="${HOME}/.ssh/config"
+    touch "$ssh_config"
+    chmod 600 "$ssh_config"
+    if ! grep -q "^Host ${ssh_host_alias}$" "$ssh_config"; then
+        {
+            echo ""
+            echo "# Added by project-bootstrap/init.sh — read-only key for ${DOTFILES_REPO_NAME}"
+            echo "Host ${ssh_host_alias}"
+            echo "    HostName github.com"
+            echo "    User git"
+            echo "    IdentityFile ${key_path}"
+            echo "    IdentitiesOnly yes"
+        } >> "$ssh_config"
+        success "Added SSH config alias '${ssh_host_alias}'"
+    fi
+
+    # 3. Maybe the key was registered on a prior run — try SSH first to skip
+    #    the walk-through entirely.
+    if test_dotfiles_ssh; then
+        info "SSH already works (key was registered before)."
+        if git clone "$ssh_url" "$target"; then
+            success "Cloned via SSH deploy key."
+            return 0
+        fi
+    fi
+
+    # 4. Walk the user through adding the key on GitHub.
+    local deploy_keys_url="https://github.com/${GH_USER}/${DOTFILES_REPO_NAME}/settings/keys/new"
+    echo ""
+    echo "============================================================"
+    echo "  PUBLIC KEY (copy this entire line):"
+    echo "============================================================"
+    cat "${key_path}.pub"
+    echo "============================================================"
+    echo ""
+    echo "Add it as a deploy key on:"
+    echo "    ${deploy_keys_url}"
+    echo ""
+    echo "  - Paste the key above into the 'Key' field"
+    echo "  - LEAVE 'Allow write access' UNCHECKED (this is read-only)"
+    echo "  - Click 'Add key'"
+    echo ""
+    open_url "$deploy_keys_url" || warn "Couldn't auto-open browser — copy the URL above manually."
+
+    # 5. Retry loop: give a few chances since GitHub takes a moment to
+    #    propagate a new key and the user might mis-click.
+    local attempt
+    for attempt in 1 2 3; do
+        echo ""
+        local reply
+        if ! read -r -p "Press Enter once the deploy key is added (or 'q' to skip dotfiles): " reply < /dev/tty; then
+            warn "Couldn't read terminal — aborting dotfiles setup."
+            return 1
+        fi
+        if [[ "$reply" == "q" || "$reply" == "Q" ]]; then
+            warn "User quit dotfiles setup."
+            return 1
+        fi
+
+        info "Testing SSH access (attempt ${attempt}/3)..."
+        if test_dotfiles_ssh; then
+            if git clone "$ssh_url" "$target"; then
+                success "Cloned via SSH deploy key."
+                return 0
+            fi
+            warn "SSH auth worked but clone failed. Trying once more..."
+            continue
+        fi
+
+        warn "SSH still not authenticating. Common causes:"
+        warn "  - Deploy key not actually added on GitHub (recheck the page)"
+        warn "  - GitHub still propagating (wait 15-30s)"
+        warn "  - Network blocking SSH on port 22"
+        warn "Deploy keys page: ${deploy_keys_url}"
+    done
+
+    error "Gave up after 3 attempts — could not enable dotfiles access."
     return 1
 }
 
@@ -290,15 +442,37 @@ success "Claude Code ready"
 # Step 4: Dotfiles
 # ----------------------------------------------------------------------------
 step "4/14: Checking dotfiles"
-if [[ ! -d "${HOME}/.dotfiles" ]]; then
-    read -p "Dotfiles not found at ~/.dotfiles. Clone and install now? [Y/n] " -n 1 -r < /dev/tty
+# Resolve where dotfiles already lives (if anywhere). Priority:
+#   1. CACHED_DOTFILES_PATH from the identity cache (set by dev-setup.sh on
+#      fresh-machine setup, or by a prior init.sh run).
+#   2. ~/.dotfiles (legacy / init.sh's own clone target).
+# If neither exists, walk through ensure_dotfiles_clone — which tries HTTPS
+# first and falls back to a guided SSH deploy-key flow if the repo is private.
+DOTFILES_PATH=""
+if [[ -n "${CACHED_DOTFILES_PATH:-}" && -d "${CACHED_DOTFILES_PATH}/.git" ]]; then
+    DOTFILES_PATH="$CACHED_DOTFILES_PATH"
+    success "Dotfiles already at ${DOTFILES_PATH} (from cache)"
+elif [[ -d "${HOME}/.dotfiles/.git" ]]; then
+    DOTFILES_PATH="${HOME}/.dotfiles"
+    success "Dotfiles already at ${DOTFILES_PATH}"
+else
+    read -p "Dotfiles not found locally. Clone and install now? [Y/n] " -n 1 -r < /dev/tty
     echo
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        git clone "$DOTFILES_REPO" "${HOME}/.dotfiles"
-        bash "${HOME}/.dotfiles/install.sh"
+        if ensure_dotfiles_clone "${HOME}/.dotfiles"; then
+            DOTFILES_PATH="${HOME}/.dotfiles"
+        else
+            warn "Continuing without dotfiles. Re-run init.sh later, or run dev-setup.sh, to retry."
+        fi
+    else
+        info "Skipping dotfiles install."
     fi
-else
-    success "Dotfiles already installed"
+fi
+
+if [[ -n "$DOTFILES_PATH" ]]; then
+    info "Running ${DOTFILES_PATH}/install.sh"
+    bash "${DOTFILES_PATH}/install.sh"
+    update_cache_field "CACHED_DOTFILES_PATH" "$DOTFILES_PATH"
 fi
 
 # ----------------------------------------------------------------------------

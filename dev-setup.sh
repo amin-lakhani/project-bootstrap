@@ -225,10 +225,40 @@ load_or_prompt_identity() {
         echo "CACHED_GH_USER_ID='${GH_USER_ID}'"
         echo "CACHED_GIT_NAME='${GIT_NAME}'"
         echo "CACHED_GIT_EMAIL='${GIT_EMAIL}'"
+        # Preserve dotfiles-path entry if a prior run recorded one.
+        [[ -n "${CACHED_DOTFILES_PATH:-}" ]] && echo "CACHED_DOTFILES_PATH='${CACHED_DOTFILES_PATH}'"
     } > "$IDENTITY_CACHE"
     chmod 600 "$IDENTITY_CACHE"
 
     info "Identity: ${GIT_NAME} <${GIT_EMAIL}> (GitHub: ${GH_USER}, ID: ${GH_USER_ID})"
+}
+
+# Update a single field in the identity cache without disturbing the others.
+# Used when we learn something new mid-run (e.g. CACHED_DOTFILES_PATH after a
+# successful clone) that load_or_prompt_identity didn't have at the time.
+update_cache_field() {
+    local name="$1"
+    local value="$2"
+    mkdir -p "$(dirname "$IDENTITY_CACHE")"
+    touch "$IDENTITY_CACHE"
+    chmod 600 "$IDENTITY_CACHE"
+    if grep -q "^${name}=" "$IDENTITY_CACHE" 2>/dev/null; then
+        sed -i "/^${name}=/d" "$IDENTITY_CACHE"
+    fi
+    echo "${name}='${value}'" >> "$IDENTITY_CACHE"
+}
+
+# Probe SSH auth to the dotfiles-scoped alias. Returns 0 if GitHub recognizes
+# the deploy key. `ssh -T` always exits 1 on github.com, so look for one of
+# the success signatures in the output instead.
+test_dotfiles_ssh() {
+    local output
+    output="$(timeout 15 ssh -T \
+        -o StrictHostKeyChecking=accept-new \
+        -o BatchMode=yes \
+        "git@${DOTFILES_SSH_HOST}" < /dev/null 2>&1 || true)"
+    debug "test_dotfiles_ssh output: ${output}"
+    echo "$output" | grep -qiE "successfully authenticated|deploy key|does not provide shell access"
 }
 
 # Detect environment for diagnostic context.
@@ -529,52 +559,68 @@ read -r _ < /dev/tty || true
 
 # ----- Step 3: test SSH auth for the dotfiles alias ------------------------
 step "Verify SSH auth (via ${DOTFILES_REPO_NAME} alias)"
-# `ssh -T` to GitHub exits 1 even on success; deploy keys authenticate as
-# the repo, not the user, so the message is different ("appears to be a
-# deploy key" or "does not provide shell access").
+# Loop the SSH test rather than exiting on the first failure — GitHub takes a
+# beat to propagate a new deploy key, and the user may have mis-clicked the
+# 'Add key' page. Give them a few chances to fix it without re-running.
 info "Testing: ssh -T -o StrictHostKeyChecking=accept-new git@${DOTFILES_SSH_HOST}"
 
-# Defensive ssh invocation. Three things matter here:
-#   - `< /dev/null`: when running via `curl | bash`, the script's stdin is the
-#     closed curl pipe. Inside $(...), ssh inherits that stdin and on some
-#     setups hangs waiting on it. Explicit /dev/null avoids that entirely.
-#   - `BatchMode=yes`: tells ssh "never prompt interactively" (no passphrase
-#     prompts, no host-key confirmation prompts — we already have
-#     StrictHostKeyChecking=accept-new for that).
-#   - `timeout 30`: hard ceiling so a hung ssh can't silently freeze the
-#     script. If ssh isn't done in 30s, something is broken — surface it.
-# Also disable ERR trap + set -e around the call so weird exits can't kill
-# the script silently.
+ssh_attempt=1
+ssh_max_attempts=3
+ssh_ok=0
+# Disable ERR trap + set -e around the loop so weird exits from ssh/timeout
+# can't kill the script silently.
 trap - ERR
 set +e
-ssh_output="$(timeout 30 ssh -T \
-    -o StrictHostKeyChecking=accept-new \
-    -o BatchMode=yes \
-    "git@${DOTFILES_SSH_HOST}" < /dev/null 2>&1)"
-ssh_exit=$?
+while (( ssh_attempt <= ssh_max_attempts )); do
+    info "Attempt ${ssh_attempt}/${ssh_max_attempts}..."
+    ssh_output="$(timeout 30 ssh -T \
+        -o StrictHostKeyChecking=accept-new \
+        -o BatchMode=yes \
+        "git@${DOTFILES_SSH_HOST}" < /dev/null 2>&1)"
+    ssh_exit=$?
+    if [[ "$ssh_exit" == "124" ]]; then
+        warn "ssh timed out after 30s (exit 124)."
+    fi
+    info "ssh exit code: ${ssh_exit}"
+    if [[ -n "$ssh_output" ]]; then
+        echo "$ssh_output" | sed 's/^/    /'
+    else
+        warn "(no output captured)"
+    fi
+
+    if echo "$ssh_output" | grep -qiE "successfully authenticated|deploy key|does not provide shell access"; then
+        ssh_ok=1
+        break
+    fi
+
+    if (( ssh_attempt < ssh_max_attempts )); then
+        warn "SSH didn't authenticate. Common causes:"
+        warn "  - Deploy key not actually added on GitHub (recheck the page)"
+        warn "  - GitHub still propagating the key (wait 15-30s)"
+        warn "  - Network/firewall blocking SSH on port 22"
+        warn "Add key at: ${GITHUB_KEYS_URL}"
+        echo ""
+        if open_url "$GITHUB_KEYS_URL"; then
+            info "Re-opened the deploy keys page in your browser."
+        fi
+        prompt "Press Enter to retry, or type 'q' to abort: "
+        retry_reply=""
+        read -r retry_reply < /dev/tty || retry_reply="q"
+        if [[ "$retry_reply" == "q" || "$retry_reply" == "Q" ]]; then
+            break
+        fi
+    fi
+    ssh_attempt=$((ssh_attempt + 1))
+done
 set -e
 trap 'on_err $LINENO "$BASH_COMMAND"' ERR
-if [[ "$ssh_exit" == "124" ]]; then
-    warn "ssh timed out after 30s (timeout exit code 124)."
-fi
 
-info "ssh exit code: ${ssh_exit}"
-info "ssh output (${#ssh_output} bytes):"
-if [[ -n "$ssh_output" ]]; then
-    echo "$ssh_output" | sed 's/^/    /'
-else
-    warn "(no output captured)"
-fi
-
-if echo "$ssh_output" | grep -qiE "successfully authenticated|deploy key|does not provide shell access"; then
+if (( ssh_ok == 1 )); then
     success "SSH auth working for ${DOTFILES_REPO_NAME}."
 else
-    error "SSH auth check did not find a success signature in the output above."
-    error "Common causes:"
-    error "  - Deploy key not actually added on GitHub (recheck the page)"
-    error "  - GitHub still propagating the key (wait 15-30s + re-run)"
-    error "  - Network/firewall blocking SSH on port 22 (try: ssh -T -p 443 git@ssh.github.com)"
-    error "Add key at: https://github.com/${GH_USER}/${DOTFILES_REPO_NAME}/settings/keys"
+    error "SSH auth check failed after ${ssh_max_attempts} attempts."
+    error "Add the deploy key at: https://github.com/${GH_USER}/${DOTFILES_REPO_NAME}/settings/keys"
+    error "Re-run this script when you're ready."
     error "Log file: ${LOG_FILE}"
     exit 1
 fi
@@ -588,6 +634,10 @@ else
     git clone "$DOTFILES_REPO" "${WORK_DIR}/${DOTFILES_REPO_NAME}"
     success "Cloned ${DOTFILES_REPO_NAME}."
 fi
+# Record the dotfiles location so init.sh (per-project setup) can find this
+# checkout instead of trying to re-clone into ~/.dotfiles.
+update_cache_field "CACHED_DOTFILES_PATH" "${WORK_DIR}/${DOTFILES_REPO_NAME}"
+
 if [[ -d "${WORK_DIR}/${BOOTSTRAP_REPO_NAME}/.git" ]]; then
     info "${BOOTSTRAP_REPO_NAME} repo already cloned — skipping."
 else

@@ -67,7 +67,7 @@ It will:
 3. Open `github.com/new` with the name pre-filled — click Create (you can also use the page's "uploading an existing file" link to drop in starter files)
 4. Make the local folder and hand off to `init.sh`, which:
    - Updates OS + npm + Claude Code
-   - Installs dotfiles if not already present
+   - **Installs dotfiles**: reuses an existing checkout (recorded by `dev-setup.sh`, or at `~/.dotfiles`), or clones fresh. If the dotfiles repo is private and HTTPS clone fails, walks you through generating an SSH deploy key, registering it on GitHub, and retries — same recovery flow as `dev-setup.sh`. If it can't enable access, the rest of the bootstrap still runs without dotfiles.
    - Drops a `.devcontainer/` into the folder
    - Generates a per-project read-write SSH deploy key + walks you through registering it
    - Wires up git and pulls down anything you uploaded via the web UI
@@ -85,10 +85,10 @@ curl -fsSL https://raw.githubusercontent.com/<YOUR-GH-USER>/project-bootstrap/ma
 You'll be prompted for:
 - Identity (first run only — cached after that; see [Identity](#identity))
 - Work directory name under `$HOME` (default: `dev`, override with `BOOTSTRAP_WORK_DIR`)
-- A **read-only deploy key** scoped to the `dotfiles` repo — auto-generated, with title + pubkey copied to your clipboard (back-to-back, both live in clipboard history) and a browser walk-through
+- A **read-only deploy key** scoped to the `dotfiles` repo — auto-generated, with title + pubkey copied to your clipboard (back-to-back, both live in clipboard history) and a browser walk-through. The SSH-auth check loops up to 3 times so you can fix a missing key without re-running the whole script.
 
 When done you'll have:
-- `~/<dir>/dotfiles/` — cloned via the deploy key (read-only on this machine)
+- `~/<dir>/dotfiles/` — cloned via the deploy key (read-only on this machine), and the path is recorded in the identity cache so `init.sh` finds it on later per-project runs
 - `~/<dir>/project-bootstrap/` — cloned anon HTTPS (it's public)
 - A symlink wiring Claude Code's memory to the synced files in the dotfiles repo
 
