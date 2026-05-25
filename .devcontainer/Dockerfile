@@ -7,11 +7,15 @@ RUN apt-get update && apt-get install -y \
     curl \
     wget \
     git \
+    gh \
     jq \
     openssh-client \
     ca-certificates \
     gnupg \
     sudo \
+    unzip \
+    zip \
+    xz-utils \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 

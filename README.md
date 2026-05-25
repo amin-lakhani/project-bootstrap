@@ -128,4 +128,4 @@ DEBUG=1 curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstr
 - `start.sh` — new-project wrapper, prompts for name + opens GitHub `new` page
 - `init.sh` — per-project setup (dev container + deploy key + git wiring)
 - `dev-setup.sh` — fresh-machine setup of the bootstrap tools
-- `.devcontainer/` — dev container template copied into new projects by `init.sh`. The dev container bind-mounts your host `~/.gitconfig`, `~/.ssh`, and `~/.claude/{settings.json,statusline.js}` so identity flows through without being hardcoded.
+- `.devcontainer/` — dev container template copied into new projects by `init.sh`. Preinstalled: Node.js LTS, npm, Claude Code, plus `curl` / `wget` / `git` / `gh` / `jq` / `unzip` / `zip` / `xz-utils` / `build-essential` and basic SSH/cert/GPG tooling. Bind-mounts your host `~/.gitconfig`, `~/.ssh`, and `~/.claude/{settings.json,statusline.js}` so identity flows through without being hardcoded.
