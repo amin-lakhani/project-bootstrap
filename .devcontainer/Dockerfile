@@ -40,3 +40,10 @@ RUN groupadd --gid $USER_GID $USERNAME && \
 
 USER $USERNAME
 WORKDIR /workspace
+
+# Pre-create ~/.claude/ so devcontainer.json's file-level bind mounts (which
+# only mount settings.json + statusline.js, not the whole dir) have a parent
+# to land in. Claude Code writes session-env/, history.jsonl, projects/, etc.
+# into the rest of this dir at runtime — that part stays container-local +
+# writable, separate from the host's ~/.claude/.
+RUN mkdir -p /home/$USERNAME/.claude

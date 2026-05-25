@@ -6,7 +6,8 @@
     "remoteUser": "vscode",
     "mounts": [
         "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,readonly",
-        "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,readonly"
+        "source=${localEnv:HOME}/.claude/settings.json,target=/home/vscode/.claude/settings.json,type=bind,readonly",
+        "source=${localEnv:HOME}/.claude/statusline.js,target=/home/vscode/.claude/statusline.js,type=bind,readonly"
     ],
     "customizations": {
         "vscode": {
