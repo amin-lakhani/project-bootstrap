@@ -276,6 +276,23 @@ update_cache_field() {
     echo "${name}='${value}'" >> "$IDENTITY_CACHE"
 }
 
+# Pull the latest commits into an existing dotfiles checkout. Always called
+# when we reuse a checkout so the installed config reflects what's on the
+# remote — the repo can change between bootstraps and the user explicitly
+# wants the latest. Uses --ff-only so local edits (someone actively iterating
+# on dotfiles) aren't clobbered; falls back to a warning if pull can't fast-
+# forward (divergence, network down, etc.) so the bootstrap still completes.
+update_dotfiles_checkout() {
+    local path="$1"
+    info "Pulling latest from origin for ${path}..."
+    if git -C "$path" pull --ff-only --quiet 2>&1; then
+        success "Dotfiles up to date."
+    else
+        warn "Couldn't fast-forward dotfiles (network down, local changes, or remote divergence)."
+        warn "Continuing with the current local copy. Inspect: git -C ${path} status"
+    fi
+}
+
 # Probe SSH auth to the dotfiles-scoped alias. Returns 0 if GitHub recognizes
 # the deploy key. `ssh -T` always exits 1 on github.com, so look for one of
 # the success signatures in the output instead.
@@ -452,9 +469,11 @@ DOTFILES_PATH=""
 if [[ -n "${CACHED_DOTFILES_PATH:-}" && -d "${CACHED_DOTFILES_PATH}/.git" ]]; then
     DOTFILES_PATH="$CACHED_DOTFILES_PATH"
     success "Dotfiles already at ${DOTFILES_PATH} (from cache)"
+    update_dotfiles_checkout "$DOTFILES_PATH"
 elif [[ -d "${HOME}/.dotfiles/.git" ]]; then
     DOTFILES_PATH="${HOME}/.dotfiles"
     success "Dotfiles already at ${DOTFILES_PATH}"
+    update_dotfiles_checkout "$DOTFILES_PATH"
 else
     read -p "Dotfiles not found locally. Clone and install now? [Y/n] " -n 1 -r < /dev/tty
     echo

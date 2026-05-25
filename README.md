@@ -67,7 +67,7 @@ It will:
 3. Open `github.com/new` with the name pre-filled — click Create (you can also use the page's "uploading an existing file" link to drop in starter files)
 4. Make the local folder and hand off to `init.sh`, which:
    - Updates OS + npm + Claude Code
-   - **Installs dotfiles**: reuses an existing checkout (recorded by `dev-setup.sh`, or at `~/.dotfiles`), or clones fresh. If the dotfiles repo is private and HTTPS clone fails, walks you through generating an SSH deploy key, registering it on GitHub, and retries — same recovery flow as `dev-setup.sh`. If it can't enable access, the rest of the bootstrap still runs without dotfiles.
+   - **Installs dotfiles**: reuses an existing checkout (recorded by `dev-setup.sh`, or at `~/.dotfiles`), or clones fresh. **Always `git pull --ff-only`s the latest** from the dotfiles remote before running `install.sh` so each new project picks up the most recent config (safe pull — local edits to the dotfiles repo, if you're iterating on it, are never clobbered; if the pull can't fast-forward, it warns and uses what's on disk). If the dotfiles repo is private and HTTPS clone fails, walks you through generating an SSH deploy key, registering it on GitHub, and retries — same recovery flow as `dev-setup.sh`. If it can't enable access, the rest of the bootstrap still runs without dotfiles.
    - Drops a `.devcontainer/` into the folder
    - Generates a per-project read-write SSH deploy key + walks you through registering it
    - Wires up git and pulls down anything you uploaded via the web UI

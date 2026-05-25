@@ -248,6 +248,23 @@ update_cache_field() {
     echo "${name}='${value}'" >> "$IDENTITY_CACHE"
 }
 
+# Pull the latest commits into an existing dotfiles checkout. Always called
+# when we reuse a checkout so it tracks the remote — the dotfiles repo can
+# change between bootstraps and the user explicitly wants the latest. Uses
+# --ff-only so local edits aren't clobbered; falls back to a warning if pull
+# can't fast-forward (divergence, network down, etc.) so the bootstrap still
+# completes.
+update_dotfiles_checkout() {
+    local path="$1"
+    info "Pulling latest from origin for ${path}..."
+    if git -C "$path" pull --ff-only --quiet 2>&1; then
+        success "Dotfiles up to date."
+    else
+        warn "Couldn't fast-forward dotfiles (network down, local changes, or remote divergence)."
+        warn "Continuing with the current local copy. Inspect: git -C ${path} status"
+    fi
+}
+
 # Probe SSH auth to the dotfiles-scoped alias. Returns 0 if GitHub recognizes
 # the deploy key. `ssh -T` always exits 1 on github.com, so look for one of
 # the success signatures in the output instead.
@@ -629,7 +646,8 @@ fi
 step "Clone ${DOTFILES_REPO_NAME} + ${BOOTSTRAP_REPO_NAME}"
 cd "$WORK_DIR"
 if [[ -d "${WORK_DIR}/${DOTFILES_REPO_NAME}/.git" ]]; then
-    info "${DOTFILES_REPO_NAME} repo already cloned — skipping."
+    info "${DOTFILES_REPO_NAME} repo already cloned."
+    update_dotfiles_checkout "${WORK_DIR}/${DOTFILES_REPO_NAME}"
 else
     git clone "$DOTFILES_REPO" "${WORK_DIR}/${DOTFILES_REPO_NAME}"
     success "Cloned ${DOTFILES_REPO_NAME}."
