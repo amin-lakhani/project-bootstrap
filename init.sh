@@ -4,13 +4,21 @@ set -euo pipefail
 # ============================================================================
 # Project Bootstrap — per-project setup
 # Run from inside an empty new project folder.
+#
+# Identity (GitHub user, git name/email) is sourced in this priority order:
+#   1. BOOTSTRAP_GH_USER / BOOTSTRAP_GH_USER_ID / BOOTSTRAP_GIT_NAME
+#      / BOOTSTRAP_GIT_EMAIL env vars
+#   2. Cache file at $XDG_CONFIG_HOME (or ~/.config) /project-bootstrap/user.env
+#   3. `git config --global user.{name,email}` (for name/email only)
+#   4. Interactive prompt over /dev/tty
+# Whatever is resolved is written back to the cache file so future runs are
+# non-interactive.
 # ============================================================================
 
-BOOTSTRAP_RAW="https://raw.githubusercontent.com/amin-lakhani/project-bootstrap/main"
-DOTFILES_REPO="https://github.com/amin-lakhani/dotfiles.git"
-GIT_NAME="Amin Lakhani"
-GIT_EMAIL="85595676+amin-lakhani@users.noreply.github.com"
-GH_USER="amin-lakhani"
+# Repo names default to the canonical pair but can be overridden if you forked
+# them under different names.
+BOOTSTRAP_REPO_NAME="${BOOTSTRAP_REPO_NAME:-project-bootstrap}"
+DOTFILES_REPO_NAME="${DOTFILES_REPO_NAME:-dotfiles}"
 
 # ----- Logging ---------------------------------------------------------------
 # All output tees to a timestamped log file so failures stay diagnosable
@@ -28,6 +36,7 @@ info()    { echo -e "\033[90m[$(ts)]\033[0m \033[36m[INFO]\033[0m $1"; }
 success() { echo -e "\033[90m[$(ts)]\033[0m \033[32m[OK]\033[0m $1"; }
 warn()    { echo -e "\033[90m[$(ts)]\033[0m \033[33m[WARN]\033[0m $1"; }
 error()   { echo -e "\033[90m[$(ts)]\033[0m \033[31m[ERROR]\033[0m $1"; }
+prompt()  { echo -e "\033[90m[$(ts)]\033[0m \033[34m[?]\033[0m $1"; }
 step()    { echo ""; echo -e "\033[90m[$(ts)]\033[0m \033[35m=== $1 ===\033[0m"; }
 debug()   { [[ "${DEBUG:-0}" == "1" ]] && echo -e "\033[90m[$(ts)] [DEBUG]\033[0m $1" || true; }
 
@@ -47,6 +56,175 @@ trap 'on_err $LINENO "$BASH_COMMAND"' ERR
 
 info "Log file: ${LOG_FILE}"
 debug "Set DEBUG=1 before running for extra-verbose tracing"
+
+# ----- Identity (env > cache > git config > auto-fetch > prompt) ------------
+IDENTITY_CACHE="${XDG_CONFIG_HOME:-${HOME}/.config}/project-bootstrap/user.env"
+
+# Fetch the numeric account ID from the public GitHub API. Unauthenticated
+# (60 req/h per IP) so it's fine for a one-time bootstrap. Prints the ID on
+# success, returns non-zero on any failure (offline, typo'd username, rate
+# limit). No jq dependency — grep the JSON.
+fetch_github_user_id() {
+    local gh_user="$1"
+    local response
+    response="$(curl -fsSL \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "https://api.github.com/users/${gh_user}" 2>/dev/null || true)"
+    [[ -z "$response" ]] && return 1
+    # The top-level "id" field is the account ID. It appears before any nested
+    # objects in the response, so the first match is the right one.
+    local id
+    id="$(printf '%s' "$response" | grep -oE '"id"[[:space:]]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+')"
+    [[ -z "$id" ]] && return 1
+    printf '%s' "$id"
+}
+
+# Detect the user's GitHub username from local signals so we can offer it as
+# an Enter-to-accept default. Tries (in order):
+#   1. gh CLI (`gh api user`) if installed + authenticated
+#   2. `git config --global user.email` if it parses as the GitHub
+#      noreply format <id>+<user>@users.noreply.github.com
+# Prints the username on success, nothing on failure. Never errors.
+detect_github_username() {
+    if command -v gh &>/dev/null; then
+        local u
+        u="$(gh api user 2>/dev/null | grep -oE '"login"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+        if [[ -n "$u" ]]; then
+            printf '%s' "$u"
+            return 0
+        fi
+    fi
+    local email
+    email="$(git config --global --get user.email 2>/dev/null || true)"
+    if [[ "$email" =~ ^[0-9]+\+([a-zA-Z0-9-]+)@users\.noreply\.github\.com$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    return 1
+}
+
+# Detect the user's preferred git author name. Tries (in order):
+#   1. gh CLI (`gh api user`) if installed + authenticated
+#   2. `git config --global user.name`
+# Prints the name on success, nothing on failure.
+detect_git_author_name() {
+    if command -v gh &>/dev/null; then
+        local n
+        n="$(gh api user 2>/dev/null | grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+        if [[ -n "$n" && "$n" != "null" ]]; then
+            printf '%s' "$n"
+            return 0
+        fi
+    fi
+    local name
+    name="$(git config --global --get user.name 2>/dev/null || true)"
+    if [[ -n "$name" ]]; then
+        printf '%s' "$name"
+        return 0
+    fi
+    return 1
+}
+
+load_or_prompt_identity() {
+    mkdir -p "$(dirname "$IDENTITY_CACHE")"
+    local cached_gh_user="" cached_gh_user_id="" cached_git_name="" cached_git_email=""
+    if [[ -f "$IDENTITY_CACHE" ]]; then
+        # shellcheck disable=SC1090
+        source "$IDENTITY_CACHE"
+        cached_gh_user="${CACHED_GH_USER:-}"
+        cached_gh_user_id="${CACHED_GH_USER_ID:-}"
+        cached_git_name="${CACHED_GIT_NAME:-}"
+        cached_git_email="${CACHED_GIT_EMAIL:-}"
+    fi
+
+    GH_USER="${BOOTSTRAP_GH_USER:-$cached_gh_user}"
+    GH_USER_ID="${BOOTSTRAP_GH_USER_ID:-$cached_gh_user_id}"
+    GIT_NAME="${BOOTSTRAP_GIT_NAME:-$cached_git_name}"
+    GIT_EMAIL="${BOOTSTRAP_GIT_EMAIL:-$cached_git_email}"
+
+    # Username: detect from gh CLI or .gitconfig (noreply parse) and offer as
+    # Enter-to-accept default. No silent fallback — always give the user a
+    # chance to confirm or type something else.
+    if [[ -z "$GH_USER" ]]; then
+        local detected_user
+        detected_user="$(detect_github_username || true)"
+        if [[ -n "$detected_user" ]]; then
+            prompt "GitHub username [Enter for ${detected_user}]:"
+            read -r GH_USER < /dev/tty
+            GH_USER="${GH_USER:-$detected_user}"
+        else
+            prompt "GitHub username:"
+            read -r GH_USER < /dev/tty
+        fi
+    fi
+
+    # Auto-fetch the numeric ID from the GitHub API so the user never has to
+    # look it up. Only prompts if the fetch fails (offline / rate-limited /
+    # typo). Cached after first run so we don't re-hit the API every time.
+    if [[ -z "$GH_USER_ID" ]]; then
+        info "Looking up numeric GitHub user ID for '${GH_USER}'..."
+        GH_USER_ID="$(fetch_github_user_id "$GH_USER" || true)"
+        if [[ -n "$GH_USER_ID" ]]; then
+            info "Resolved ID: ${GH_USER_ID}"
+        else
+            warn "Couldn't fetch from api.github.com (offline / typo / rate limit)."
+            prompt "GitHub numeric user ID (find at https://api.github.com/users/${GH_USER}):"
+            read -r GH_USER_ID < /dev/tty
+        fi
+    fi
+
+    # Author name: same detect-then-confirm pattern.
+    if [[ -z "$GIT_NAME" ]]; then
+        local detected_name
+        detected_name="$(detect_git_author_name || true)"
+        if [[ -n "$detected_name" ]]; then
+            prompt "Git author name [Enter for ${detected_name}]:"
+            read -r GIT_NAME < /dev/tty
+            GIT_NAME="${GIT_NAME:-$detected_name}"
+        else
+            prompt "Git author name (e.g. 'Jane Doe'):"
+            read -r GIT_NAME < /dev/tty
+        fi
+    fi
+
+    # Always derive the noreply email — never prompt. This is the whole point:
+    # eliminating the chance of a real address landing in a public commit by
+    # mistake. To override, set BOOTSTRAP_GIT_EMAIL explicitly (and accept the
+    # warning below).
+    if [[ -z "$GIT_EMAIL" ]]; then
+        GIT_EMAIL="${GH_USER_ID}+${GH_USER}@users.noreply.github.com"
+    fi
+    if [[ "$GIT_EMAIL" != *"@users.noreply.github.com" ]]; then
+        warn "GIT_EMAIL is '${GIT_EMAIL}' — NOT a GitHub noreply address."
+        warn "Every commit will publicly expose this address. Clear BOOTSTRAP_GIT_EMAIL"
+        warn "and delete ${IDENTITY_CACHE} to fall back to the noreply default."
+    fi
+
+    for var_name in GH_USER GH_USER_ID GIT_NAME GIT_EMAIL; do
+        if [[ -z "${!var_name}" ]]; then
+            error "Identity field ${var_name} ended up empty — aborting."
+            exit 1
+        fi
+    done
+
+    {
+        echo "# Cached by project-bootstrap. Override with BOOTSTRAP_* env vars."
+        echo "CACHED_GH_USER='${GH_USER}'"
+        echo "CACHED_GH_USER_ID='${GH_USER_ID}'"
+        echo "CACHED_GIT_NAME='${GIT_NAME}'"
+        echo "CACHED_GIT_EMAIL='${GIT_EMAIL}'"
+    } > "$IDENTITY_CACHE"
+    chmod 600 "$IDENTITY_CACHE"
+
+    info "Identity: ${GIT_NAME} <${GIT_EMAIL}> (GitHub: ${GH_USER}, ID: ${GH_USER_ID})"
+}
+
+load_or_prompt_identity
+
+# Derived URLs (built from resolved identity).
+BOOTSTRAP_RAW="https://raw.githubusercontent.com/${GH_USER}/${BOOTSTRAP_REPO_NAME}/main"
+DOTFILES_REPO="https://github.com/${GH_USER}/${DOTFILES_REPO_NAME}.git"
 
 # Try several browser-opener tools. On WSL without wslview/xdg-open,
 # falls back to cmd.exe which is always present via WSL interop.
@@ -126,10 +304,18 @@ fi
 # ----------------------------------------------------------------------------
 # Step 5: Global git config
 # ----------------------------------------------------------------------------
+# Dotfiles' install.sh symlinks ~/.gitconfig to its own .gitconfig, so writing
+# `git config --global` here would silently mutate the dotfiles repo. Detect
+# that and skip — trust whatever the symlink points to.
 step "5/14: Configuring global git"
-git config --global user.name "$GIT_NAME"
-git config --global user.email "$GIT_EMAIL"
-git config --global init.defaultBranch main
+if [[ -L "${HOME}/.gitconfig" ]]; then
+    info "~/.gitconfig is a symlink (managed by dotfiles) — leaving it alone"
+else
+    git config --global user.name "$GIT_NAME"
+    git config --global user.email "$GIT_EMAIL"
+    git config --global init.defaultBranch main
+    success "Wrote ~/.gitconfig"
+fi
 
 # ----------------------------------------------------------------------------
 # Step 6: Copy .devcontainer files
@@ -275,7 +461,7 @@ fi
 success "Remote: $REMOTE_URL"
 
 # ----------------------------------------------------------------------------
-# Step 14: Pull repo contents (any files Amin uploaded)
+# Step 14: Pull repo contents (any files uploaded via the web UI)
 # ----------------------------------------------------------------------------
 step "14/14: Pulling repo contents"
 git fetch origin 2>/dev/null || true

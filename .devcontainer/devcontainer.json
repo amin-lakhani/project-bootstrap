@@ -4,8 +4,10 @@
         "dockerfile": "Dockerfile"
     },
     "remoteUser": "vscode",
+    "initializeCommand": "touch ${localEnv:HOME}/.gitconfig",
     "mounts": [
         "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,readonly",
+        "source=${localEnv:HOME}/.gitconfig,target=/tmp/host-gitconfig,type=bind,readonly",
         "source=${localEnv:HOME}/.claude/settings.json,target=/home/vscode/.claude/settings.json,type=bind,readonly",
         "source=${localEnv:HOME}/.claude/statusline.js,target=/home/vscode/.claude/statusline.js,type=bind,readonly"
     ],
@@ -16,5 +18,5 @@
             ]
         }
     },
-    "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && git config --global user.name 'Amin Lakhani' && git config --global user.email '85595676+amin-lakhani@users.noreply.github.com'"
+    "postCreateCommand": "cp /tmp/host-gitconfig ~/.gitconfig 2>/dev/null || true; git config --global --add safe.directory ${containerWorkspaceFolder}"
 }

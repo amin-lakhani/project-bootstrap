@@ -7,19 +7,28 @@ set -euo pipefail
 # Code memory sync from the dotfiles repo.
 #
 # Run anywhere on a fresh WSL machine:
-#   curl -fsSL https://raw.githubusercontent.com/amin-lakhani/project-bootstrap/main/dev-setup.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/<YOUR-GH-USER>/project-bootstrap/main/dev-setup.sh | bash
+#
+# Identity (GitHub user, git name/email) is sourced in this priority order:
+#   1. BOOTSTRAP_GH_USER / BOOTSTRAP_GH_USER_ID / BOOTSTRAP_GIT_NAME
+#      / BOOTSTRAP_GIT_EMAIL env vars
+#   2. Cache file at $XDG_CONFIG_HOME (or ~/.config) /project-bootstrap/user.env
+#   3. Interactive prompt over /dev/tty
+# Whatever is resolved is written back to the cache file so future runs are
+# non-interactive.
 # ============================================================================
 
-GH_USER="amin-lakhani"
-DEFAULT_FOLDER="dev"
-GIT_EMAIL="85595676+${GH_USER}@users.noreply.github.com"
+DEFAULT_FOLDER="${BOOTSTRAP_WORK_DIR:-dev}"
+
+# Repo names default to the canonical pair but can be overridden if you forked
+# them under different names.
+DOTFILES_REPO_NAME="${DOTFILES_REPO_NAME:-dotfiles}"
+BOOTSTRAP_REPO_NAME="${BOOTSTRAP_REPO_NAME:-project-bootstrap}"
 
 # Dotfiles is private — needs a per-repo read-only deploy key (scoped, no
 # broad account access). project-bootstrap is public — anon HTTPS works.
-DOTFILES_KEY_PATH="${HOME}/.ssh/dotfiles_ed25519"
-DOTFILES_SSH_HOST="github.com-dotfiles"
-DOTFILES_REPO="git@${DOTFILES_SSH_HOST}:${GH_USER}/dotfiles.git"
-BOOTSTRAP_REPO="https://github.com/${GH_USER}/project-bootstrap.git"
+DOTFILES_KEY_PATH="${HOME}/.ssh/${DOTFILES_REPO_NAME}_ed25519"
+DOTFILES_SSH_HOST="github.com-${DOTFILES_REPO_NAME}"
 
 CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'
 BLUE='\033[34m'; MAGENTA='\033[35m'; GRAY='\033[90m'; NC='\033[0m'
@@ -56,6 +65,171 @@ trap 'on_err $LINENO "$BASH_COMMAND"' ERR
 info "Log file: ${LOG_FILE}"
 debug "DEBUG=1 is on — verbose tracing enabled."
 [[ "${DEBUG:-0}" == "1" ]] && set -x
+
+# ----- Identity (env > cache > auto-fetch > prompt) -------------------------
+IDENTITY_CACHE="${XDG_CONFIG_HOME:-${HOME}/.config}/project-bootstrap/user.env"
+
+# Fetch the numeric account ID from the public GitHub API. Unauthenticated
+# (60 req/h per IP) so it's fine for a one-time bootstrap. Prints the ID on
+# success, returns non-zero on any failure (offline, typo'd username, rate
+# limit). No jq dependency — grep the JSON.
+fetch_github_user_id() {
+    local gh_user="$1"
+    local response
+    response="$(curl -fsSL \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "https://api.github.com/users/${gh_user}" 2>/dev/null || true)"
+    [[ -z "$response" ]] && return 1
+    # The top-level "id" field is the account ID. It appears before any nested
+    # objects in the response, so the first match is the right one.
+    local id
+    id="$(printf '%s' "$response" | grep -oE '"id"[[:space:]]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+')"
+    [[ -z "$id" ]] && return 1
+    printf '%s' "$id"
+}
+
+# Detect the user's GitHub username from local signals so we can offer it as
+# an Enter-to-accept default. Tries (in order):
+#   1. gh CLI (`gh api user`) if installed + authenticated
+#   2. `git config --global user.email` if it parses as the GitHub
+#      noreply format <id>+<user>@users.noreply.github.com
+# Prints the username on success, nothing on failure. Never errors.
+detect_github_username() {
+    if command -v gh &>/dev/null; then
+        local u
+        u="$(gh api user 2>/dev/null | grep -oE '"login"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+        if [[ -n "$u" ]]; then
+            printf '%s' "$u"
+            return 0
+        fi
+    fi
+    local email
+    email="$(git config --global --get user.email 2>/dev/null || true)"
+    if [[ "$email" =~ ^[0-9]+\+([a-zA-Z0-9-]+)@users\.noreply\.github\.com$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    return 1
+}
+
+# Detect the user's preferred git author name. Tries (in order):
+#   1. gh CLI (`gh api user`) if installed + authenticated
+#   2. `git config --global user.name`
+# Prints the name on success, nothing on failure.
+detect_git_author_name() {
+    if command -v gh &>/dev/null; then
+        local n
+        n="$(gh api user 2>/dev/null | grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+        if [[ -n "$n" && "$n" != "null" ]]; then
+            printf '%s' "$n"
+            return 0
+        fi
+    fi
+    local name
+    name="$(git config --global --get user.name 2>/dev/null || true)"
+    if [[ -n "$name" ]]; then
+        printf '%s' "$name"
+        return 0
+    fi
+    return 1
+}
+
+load_or_prompt_identity() {
+    mkdir -p "$(dirname "$IDENTITY_CACHE")"
+    local cached_gh_user="" cached_gh_user_id="" cached_git_name="" cached_git_email=""
+    if [[ -f "$IDENTITY_CACHE" ]]; then
+        # shellcheck disable=SC1090
+        source "$IDENTITY_CACHE"
+        cached_gh_user="${CACHED_GH_USER:-}"
+        cached_gh_user_id="${CACHED_GH_USER_ID:-}"
+        cached_git_name="${CACHED_GIT_NAME:-}"
+        cached_git_email="${CACHED_GIT_EMAIL:-}"
+    fi
+
+    # Env > cache. (dev-setup runs on a fresh machine, so there's no
+    # ~/.gitconfig to fall back to.)
+    GH_USER="${BOOTSTRAP_GH_USER:-$cached_gh_user}"
+    GH_USER_ID="${BOOTSTRAP_GH_USER_ID:-$cached_gh_user_id}"
+    GIT_NAME="${BOOTSTRAP_GIT_NAME:-$cached_git_name}"
+    GIT_EMAIL="${BOOTSTRAP_GIT_EMAIL:-$cached_git_email}"
+
+    # Username: detect from gh CLI or .gitconfig (noreply parse) and offer as
+    # Enter-to-accept default. No silent fallback — always give the user a
+    # chance to confirm or type something else.
+    if [[ -z "$GH_USER" ]]; then
+        local detected_user
+        detected_user="$(detect_github_username || true)"
+        if [[ -n "$detected_user" ]]; then
+            prompt "GitHub username [Enter for ${detected_user}]:"
+            read -r GH_USER < /dev/tty
+            GH_USER="${GH_USER:-$detected_user}"
+        else
+            prompt "GitHub username:"
+            read -r GH_USER < /dev/tty
+        fi
+    fi
+
+    # Auto-fetch the numeric ID from the GitHub API so the user never has to
+    # look it up. Only prompts if the fetch fails (offline / rate-limited /
+    # typo). Cached after first run so we don't re-hit the API every time.
+    if [[ -z "$GH_USER_ID" ]]; then
+        info "Looking up numeric GitHub user ID for '${GH_USER}'..."
+        GH_USER_ID="$(fetch_github_user_id "$GH_USER" || true)"
+        if [[ -n "$GH_USER_ID" ]]; then
+            info "Resolved ID: ${GH_USER_ID}"
+        else
+            warn "Couldn't fetch from api.github.com (offline / typo / rate limit)."
+            prompt "GitHub numeric user ID (find at https://api.github.com/users/${GH_USER}):"
+            read -r GH_USER_ID < /dev/tty
+        fi
+    fi
+
+    # Author name: same detect-then-confirm pattern.
+    if [[ -z "$GIT_NAME" ]]; then
+        local detected_name
+        detected_name="$(detect_git_author_name || true)"
+        if [[ -n "$detected_name" ]]; then
+            prompt "Git author name [Enter for ${detected_name}]:"
+            read -r GIT_NAME < /dev/tty
+            GIT_NAME="${GIT_NAME:-$detected_name}"
+        else
+            prompt "Git author name (e.g. 'Jane Doe'):"
+            read -r GIT_NAME < /dev/tty
+        fi
+    fi
+
+    # Always derive the noreply email — never prompt. This is the whole point:
+    # eliminating the chance of a real address landing in a public commit by
+    # mistake. To override, set BOOTSTRAP_GIT_EMAIL explicitly (and accept the
+    # warning below).
+    if [[ -z "$GIT_EMAIL" ]]; then
+        GIT_EMAIL="${GH_USER_ID}+${GH_USER}@users.noreply.github.com"
+    fi
+    if [[ "$GIT_EMAIL" != *"@users.noreply.github.com" ]]; then
+        warn "GIT_EMAIL is '${GIT_EMAIL}' — NOT a GitHub noreply address."
+        warn "Every commit will publicly expose this address. Clear BOOTSTRAP_GIT_EMAIL"
+        warn "and delete ${IDENTITY_CACHE} to fall back to the noreply default."
+    fi
+
+    for var_name in GH_USER GH_USER_ID GIT_NAME GIT_EMAIL; do
+        if [[ -z "${!var_name}" ]]; then
+            error "Identity field ${var_name} ended up empty — aborting."
+            exit 1
+        fi
+    done
+
+    {
+        echo "# Cached by project-bootstrap. Override with BOOTSTRAP_* env vars."
+        echo "CACHED_GH_USER='${GH_USER}'"
+        echo "CACHED_GH_USER_ID='${GH_USER_ID}'"
+        echo "CACHED_GIT_NAME='${GIT_NAME}'"
+        echo "CACHED_GIT_EMAIL='${GIT_EMAIL}'"
+    } > "$IDENTITY_CACHE"
+    chmod 600 "$IDENTITY_CACHE"
+
+    info "Identity: ${GIT_NAME} <${GIT_EMAIL}> (GitHub: ${GH_USER}, ID: ${GH_USER_ID})"
+}
 
 # Detect environment for diagnostic context.
 detect_env() {
@@ -156,8 +330,8 @@ open_url() {
         fi
     fi
     # VS Code's CLI can open URLs in the host browser when running in a remote
-    # window (dev container, SSH, Codespaces). This is the right path for the
-    # exact env Amin's hitting now.
+    # window (dev container, SSH, Codespaces). This is the right path when
+    # running inside a dev-container or remote SSH context.
     if command -v code &> /dev/null; then
         if code --openExternal "$url" 2>/dev/null; then
             debug "open_url: used code --openExternal"
@@ -207,6 +381,14 @@ for tool in git curl ssh ssh-keygen; do
     require "$tool"
 done
 success "All required tools present."
+
+# ----- Resolve identity ----------------------------------------------------
+step "Resolve identity"
+load_or_prompt_identity
+
+# Derived URLs / repo locations.
+DOTFILES_REPO="git@${DOTFILES_SSH_HOST}:${GH_USER}/${DOTFILES_REPO_NAME}.git"
+BOOTSTRAP_REPO="https://github.com/${GH_USER}/${BOOTSTRAP_REPO_NAME}.git"
 
 # ----- Step 1: prompt for work directory -----------------------------------
 step "Choose work directory"
@@ -258,32 +440,32 @@ fi
 success "Work directory: ${WORK_DIR}"
 
 # ----- Step 2: read-only deploy key scoped to dotfiles ----------------------
-step "Deploy key for dotfiles (read-only, repo-scoped)"
+step "Deploy key for ${DOTFILES_REPO_NAME} (read-only, repo-scoped)"
 echo ""
-echo "This sets up a READ-ONLY DEPLOY KEY scoped to just the dotfiles repo."
+echo "This sets up a READ-ONLY DEPLOY KEY scoped to just the ${DOTFILES_REPO_NAME} repo."
 echo "Not a user-account key — no broad access to any of your other repos."
-echo "(project-bootstrap is public, so it doesn't need any key.)"
+echo "(${BOOTSTRAP_REPO_NAME} is public, so it doesn't need any key.)"
 echo ""
 
 KEY_ALREADY_EXISTED=0
 if [[ -f "$DOTFILES_KEY_PATH" ]]; then
-    info "Existing dotfiles key found at ${DOTFILES_KEY_PATH} — reusing."
+    info "Existing ${DOTFILES_REPO_NAME} key found at ${DOTFILES_KEY_PATH} — reusing."
     KEY_ALREADY_EXISTED=1
 else
     mkdir -p "${HOME}/.ssh"
     chmod 700 "${HOME}/.ssh"
-    ssh-keygen -t ed25519 -C "${GIT_EMAIL} (dotfiles read-only deploy key)" -f "$DOTFILES_KEY_PATH" -N ""
+    ssh-keygen -t ed25519 -C "${GIT_EMAIL} (${DOTFILES_REPO_NAME} read-only deploy key)" -f "$DOTFILES_KEY_PATH" -N ""
     success "Key generated at ${DOTFILES_KEY_PATH}"
 fi
 
-# SSH config alias so 'git@github.com-dotfiles:...' uses this key.
+# SSH config alias so 'git@github.com-<dotfiles-repo>:...' uses this key.
 SSH_CONFIG="${HOME}/.ssh/config"
 touch "$SSH_CONFIG"
 chmod 600 "$SSH_CONFIG"
 if ! grep -q "^Host ${DOTFILES_SSH_HOST}$" "$SSH_CONFIG"; then
     {
         echo ""
-        echo "# Added by project-bootstrap/dev-setup.sh — read-only key for dotfiles"
+        echo "# Added by project-bootstrap/dev-setup.sh — read-only key for ${DOTFILES_REPO_NAME}"
         echo "Host ${DOTFILES_SSH_HOST}"
         echo "    HostName github.com"
         echo "    User git"
@@ -314,7 +496,7 @@ copy_and_report() {
     esac
 }
 
-GITHUB_KEYS_URL="https://github.com/${GH_USER}/dotfiles/settings/keys/new"
+GITHUB_KEYS_URL="https://github.com/${GH_USER}/${DOTFILES_REPO_NAME}/settings/keys/new"
 info "Deploy key page: ${GITHUB_KEYS_URL}"
 # open_url uses `if` so its non-zero return is safe re: ERR trap.
 if open_url "$GITHUB_KEYS_URL"; then
@@ -346,7 +528,7 @@ prompt "Press Enter once the key is added on GitHub..."
 read -r _ < /dev/tty || true
 
 # ----- Step 3: test SSH auth for the dotfiles alias ------------------------
-step "Verify SSH auth (via dotfiles alias)"
+step "Verify SSH auth (via ${DOTFILES_REPO_NAME} alias)"
 # `ssh -T` to GitHub exits 1 even on success; deploy keys authenticate as
 # the repo, not the user, so the message is different ("appears to be a
 # deploy key" or "does not provide shell access").
@@ -385,41 +567,41 @@ else
 fi
 
 if echo "$ssh_output" | grep -qiE "successfully authenticated|deploy key|does not provide shell access"; then
-    success "SSH auth working for dotfiles."
+    success "SSH auth working for ${DOTFILES_REPO_NAME}."
 else
     error "SSH auth check did not find a success signature in the output above."
     error "Common causes:"
     error "  - Deploy key not actually added on GitHub (recheck the page)"
     error "  - GitHub still propagating the key (wait 15-30s + re-run)"
     error "  - Network/firewall blocking SSH on port 22 (try: ssh -T -p 443 git@ssh.github.com)"
-    error "Add key at: https://github.com/${GH_USER}/dotfiles/settings/keys"
+    error "Add key at: https://github.com/${GH_USER}/${DOTFILES_REPO_NAME}/settings/keys"
     error "Log file: ${LOG_FILE}"
     exit 1
 fi
 
 # ----- Step 4: clone repos --------------------------------------------------
-step "Clone dotfiles + project-bootstrap"
+step "Clone ${DOTFILES_REPO_NAME} + ${BOOTSTRAP_REPO_NAME}"
 cd "$WORK_DIR"
-if [[ -d "${WORK_DIR}/dotfiles/.git" ]]; then
-    info "dotfiles repo already cloned — skipping."
+if [[ -d "${WORK_DIR}/${DOTFILES_REPO_NAME}/.git" ]]; then
+    info "${DOTFILES_REPO_NAME} repo already cloned — skipping."
 else
-    git clone "$DOTFILES_REPO" "${WORK_DIR}/dotfiles"
-    success "Cloned dotfiles."
+    git clone "$DOTFILES_REPO" "${WORK_DIR}/${DOTFILES_REPO_NAME}"
+    success "Cloned ${DOTFILES_REPO_NAME}."
 fi
-if [[ -d "${WORK_DIR}/project-bootstrap/.git" ]]; then
-    info "project-bootstrap repo already cloned — skipping."
+if [[ -d "${WORK_DIR}/${BOOTSTRAP_REPO_NAME}/.git" ]]; then
+    info "${BOOTSTRAP_REPO_NAME} repo already cloned — skipping."
 else
-    git clone "$BOOTSTRAP_REPO" "${WORK_DIR}/project-bootstrap"
-    success "Cloned project-bootstrap."
+    git clone "$BOOTSTRAP_REPO" "${WORK_DIR}/${BOOTSTRAP_REPO_NAME}"
+    success "Cloned ${BOOTSTRAP_REPO_NAME}."
 fi
 
 # ----- Step 5: run dotfiles install ----------------------------------------
 step "Install dotfiles"
-"${WORK_DIR}/dotfiles/install.sh"
+"${WORK_DIR}/${DOTFILES_REPO_NAME}/install.sh"
 
 # ----- Step 6: wire up Claude memory symlink -------------------------------
 step "Wire up Claude Code memory sync"
-MEMORY_SRC="${WORK_DIR}/dotfiles/claude-memory-bootstrap"
+MEMORY_SRC="${WORK_DIR}/${DOTFILES_REPO_NAME}/claude-memory-bootstrap"
 if [[ ! -d "$MEMORY_SRC" ]]; then
     warn "${MEMORY_SRC} doesn't exist in the dotfiles repo — skipping memory symlink."
     warn "(If memories haven't been migrated yet, this is normal on the first machine setup.)"
@@ -445,10 +627,10 @@ fi
 echo ""
 success "Dev environment ready!"
 echo ""
-NEXT_CMD="(cd ${WORK_DIR}/project-bootstrap && code .)"
+NEXT_CMD="(cd ${WORK_DIR}/${BOOTSTRAP_REPO_NAME} && code .)"
 echo "Next steps:"
-echo "  1. Open project-bootstrap in VS Code: ${NEXT_CMD}"
-echo "  2. Or work on dotfiles:                (cd ${WORK_DIR}/dotfiles && code .)"
+echo "  1. Open ${BOOTSTRAP_REPO_NAME} in VS Code: ${NEXT_CMD}"
+echo "  2. Or work on ${DOTFILES_REPO_NAME}:        (cd ${WORK_DIR}/${DOTFILES_REPO_NAME} && code .)"
 echo ""
 clip_copy "$NEXT_CMD"
 case "$CLIP_STATUS" in
