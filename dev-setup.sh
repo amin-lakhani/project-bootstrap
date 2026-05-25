@@ -19,7 +19,7 @@ set -euo pipefail
 # non-interactive.
 # ============================================================================
 
-DEFAULT_FOLDER="${BOOTSTRAP_WORK_DIR:-development}"
+DEFAULT_FOLDER="${BOOTSTRAP_WORK_DIR:-dev_env_setup}"
 
 # Repo names default to the canonical pair but can be overridden if you forked
 # them under different names.
