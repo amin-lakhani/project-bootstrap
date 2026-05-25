@@ -425,13 +425,18 @@ ensure_dotfiles_clone() {
     touch "$ssh_config"
     chmod 600 "$ssh_config"
     if ! grep -q "^Host ${ssh_host_alias}$" "$ssh_config"; then
+        # IdentityFile uses ~/.ssh/<key>, NOT the absolute host path. The
+        # dev container init.sh produces bind-mounts the user's ~/.ssh into
+        # /home/vscode/.ssh, so the keys exist at a different absolute path
+        # inside the container — but ~ resolves to the running user's home
+        # in both contexts.
         {
             echo ""
             echo "# Added by project-bootstrap/init.sh — read-only key for ${DOTFILES_REPO_NAME}"
             echo "Host ${ssh_host_alias}"
             echo "    HostName github.com"
             echo "    User git"
-            echo "    IdentityFile ${key_path}"
+            echo "    IdentityFile ~/.ssh/${DOTFILES_REPO_NAME}_ed25519"
             echo "    IdentitiesOnly yes"
         } >> "$ssh_config"
         success "Added SSH config alias '${ssh_host_alias}'"
@@ -642,12 +647,15 @@ touch "$SSH_CONFIG"
 chmod 600 "$SSH_CONFIG"
 
 if ! grep -q "Host ${SSH_HOST_ALIAS}$" "$SSH_CONFIG"; then
+    # IdentityFile uses ~/.ssh/<key>, NOT the absolute host path — the dev
+    # container this script generates bind-mounts ~/.ssh into the container
+    # at a different absolute path, but ~ resolves correctly in both.
     cat >> "$SSH_CONFIG" <<EOF
 
 Host ${SSH_HOST_ALIAS}
     HostName github.com
     User git
-    IdentityFile ${KEY_PATH}
+    IdentityFile ~/.ssh/${KEY_NAME}
     IdentitiesOnly yes
 EOF
     success "SSH config entry added"
