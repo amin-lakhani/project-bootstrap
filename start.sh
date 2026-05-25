@@ -6,8 +6,9 @@ set -euo pipefail
 # Prompts for a project name, opens github.com/new with the name pre-filled,
 # then creates the local folder and hands off to init.sh.
 #
-# Run anywhere (no edits needed):
-#   curl -fsSL https://raw.githubusercontent.com/<YOUR-GH-USER>/project-bootstrap/main/start.sh | bash
+# Run anywhere — see README "Starting a new project" for the auto-detecting
+# snippet that resolves <YOUR-GH-USER> from gh CLI / gitconfig / prompt
+# before fetching this script.
 #
 # Identity (GitHub user, git name/email) is sourced in this priority order:
 #   1. BOOTSTRAP_GH_USER / BOOTSTRAP_GH_USER_ID / BOOTSTRAP_GIT_NAME

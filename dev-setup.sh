@@ -6,8 +6,9 @@ set -euo pipefail
 # Clones dotfiles + project-bootstrap, installs dotfiles, wires up Claude
 # Code memory sync from the dotfiles repo.
 #
-# Run anywhere on a fresh WSL machine:
-#   curl -fsSL https://raw.githubusercontent.com/<YOUR-GH-USER>/project-bootstrap/main/dev-setup.sh | bash
+# Run anywhere on a fresh WSL machine — see README "Setting up a fresh
+# machine" for the auto-detecting snippet that resolves <YOUR-GH-USER>
+# from gh CLI / gitconfig / prompt before fetching this script.
 #
 # Identity (GitHub user, git name/email) is sourced in this priority order:
 #   1. BOOTSTRAP_GH_USER / BOOTSTRAP_GH_USER_ID / BOOTSTRAP_GIT_NAME

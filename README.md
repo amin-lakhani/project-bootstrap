@@ -55,11 +55,17 @@ If you forked the bootstrap repos under different names, override these too:
 
 ## Starting a new project
 
-Paste and run (replace `<YOUR-GH-USER>` with your GitHub username, or fork this repo and use your fork's URL):
+Paste and run — the snippet detects your GitHub username from `gh` CLI or your `~/.gitconfig` (the noreply email), and only prompts if neither is set up:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<YOUR-GH-USER>/project-bootstrap/main/start.sh | bash
+GH_USER="${BOOTSTRAP_GH_USER:-}"
+[ -z "$GH_USER" ] && GH_USER="$(gh api user 2>/dev/null | grep -oE '"login":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login":[[:space:]]*"([^"]+)".*/\1/')"
+[ -z "$GH_USER" ] && GH_USER="$(git config --global user.email 2>/dev/null | sed -nE 's/^[0-9]+\+(.+)@users\.noreply\.github\.com$/\1/p')"
+[ -z "$GH_USER" ] && read -rp "GitHub username: " GH_USER
+curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap/main/start.sh" | bash
 ```
+
+(Set `BOOTSTRAP_GH_USER=<your-username>` to bypass detection entirely. If you forked this repo, also set `BOOTSTRAP_REPO_NAME` to your fork's name and `start.sh` will fetch the rest of the scripts from your fork.)
 
 It will:
 1. Resolve identity (env vars / cache / prompt) and write to the cache
@@ -76,10 +82,14 @@ Then open the folder in VS Code and "Reopen in Container."
 
 ## Setting up a fresh machine
 
-When you want to work on these bootstrap tools themselves on a brand new machine:
+When you want to work on these bootstrap tools themselves on a brand new machine. On a fresh machine you almost certainly don't have `gh` configured or a noreply `~/.gitconfig` yet, so this snippet will prompt for your username — the detection chain is here for symmetry with the new-project snippet:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<YOUR-GH-USER>/project-bootstrap/main/dev-setup.sh | bash
+GH_USER="${BOOTSTRAP_GH_USER:-}"
+[ -z "$GH_USER" ] && GH_USER="$(gh api user 2>/dev/null | grep -oE '"login":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login":[[:space:]]*"([^"]+)".*/\1/')"
+[ -z "$GH_USER" ] && GH_USER="$(git config --global user.email 2>/dev/null | sed -nE 's/^[0-9]+\+(.+)@users\.noreply\.github\.com$/\1/p')"
+[ -z "$GH_USER" ] && read -rp "GitHub username: " GH_USER
+curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap/main/dev-setup.sh" | bash
 ```
 
 You'll be prompted for:
@@ -103,10 +113,14 @@ No user-account SSH keys, no PATs. Blast radius = one repo per key. If you need 
 
 ## Logs
 
-All scripts tee their output to `$HOME/.cache/project-bootstrap/<script>-<timestamp>.log`. Each run prints the log path at start and (on error) end. Set `DEBUG=1` before the curl to enable `set -x` tracing:
+All scripts tee their output to `$HOME/.cache/project-bootstrap/<script>-<timestamp>.log`. Each run prints the log path at start and (on error) end. Set `DEBUG=1` before the snippet to enable `set -x` tracing — just prefix the `curl` line:
 
 ```bash
-DEBUG=1 curl -fsSL https://raw.githubusercontent.com/<YOUR-GH-USER>/project-bootstrap/main/dev-setup.sh | bash
+GH_USER="${BOOTSTRAP_GH_USER:-}"
+[ -z "$GH_USER" ] && GH_USER="$(gh api user 2>/dev/null | grep -oE '"login":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login":[[:space:]]*"([^"]+)".*/\1/')"
+[ -z "$GH_USER" ] && GH_USER="$(git config --global user.email 2>/dev/null | sed -nE 's/^[0-9]+\+(.+)@users\.noreply\.github\.com$/\1/p')"
+[ -z "$GH_USER" ] && read -rp "GitHub username: " GH_USER
+DEBUG=1 curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap/main/dev-setup.sh" | bash
 ```
 
 ## Files
