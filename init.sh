@@ -260,6 +260,81 @@ open_url() {
     return 1
 }
 
+# Try every clipboard mechanism we know about, in order of "actually copies to
+# the OS clipboard" → "best-effort terminal escape" → "give up". Reports
+# outcome via the global CLIP_STATUS instead of return codes so callers never
+# trip the ERR trap (some bash builds fire ERR even with set +e).
+# CLIP_STATUS values: "ok" | "osc52" | "none"
+CLIP_STATUS="none"
+clip_copy() {
+    local content="$1"
+    CLIP_STATUS="none"
+    if command -v clip.exe &> /dev/null; then
+        if printf '%s' "$content" | clip.exe 2>/dev/null; then
+            CLIP_STATUS="ok"; return 0
+        fi
+    fi
+    if command -v pbcopy &> /dev/null; then
+        if printf '%s' "$content" | pbcopy 2>/dev/null; then
+            CLIP_STATUS="ok"; return 0
+        fi
+    fi
+    if command -v wl-copy &> /dev/null; then
+        if printf '%s' "$content" | wl-copy 2>/dev/null; then
+            CLIP_STATUS="ok"; return 0
+        fi
+    fi
+    if command -v xclip &> /dev/null; then
+        if printf '%s' "$content" | xclip -selection clipboard 2>/dev/null; then
+            CLIP_STATUS="ok"; return 0
+        fi
+    fi
+    if command -v xsel &> /dev/null; then
+        if printf '%s' "$content" | xsel --clipboard --input 2>/dev/null; then
+            CLIP_STATUS="ok"; return 0
+        fi
+    fi
+    # OSC52 terminal escape — works in VS Code terminal, Windows Terminal,
+    # iTerm2, kitty, tmux 3.3+. Fire-and-forget; can't confirm the terminal
+    # honored it, only that we emitted it.
+    local b64
+    b64="$(printf '%s' "$content" | base64 -w0 2>/dev/null)" \
+        || b64="$(printf '%s' "$content" | base64 | tr -d '\n')" \
+        || b64=""
+    if [[ -n "$b64" ]]; then
+        printf '\033]52;c;%s\007' "$b64"
+        CLIP_STATUS="osc52"; return 0
+    fi
+    return 0
+}
+
+# Put a value on the clipboard with consistent status messaging. Lets the
+# caller stay quiet about which clipboard mechanism actually fired.
+copy_and_report() {
+    local label="$1"
+    local value="$2"
+    clip_copy "$value"
+    case "$CLIP_STATUS" in
+        ok)    success "${label} copied to clipboard." ;;
+        osc52) warn "${label} sent via OSC52 terminal escape — your terminal may or may not have honored it." ;;
+        *)     warn "Couldn't reach any clipboard tool — copy the ${label,,} from the box above manually." ;;
+    esac
+}
+
+# Bordered print so the user can scroll up and find the value easily when
+# clipboard automation fails.
+boxed_print() {
+    local label="$1"
+    local body="$2"
+    echo ""
+    echo "  ┌─[${label}]──────────────────────────────────────────"
+    while IFS= read -r line; do
+        echo "  │ ${line}"
+    done <<< "$body"
+    echo "  └────────────────────────────────────────────────────"
+    echo ""
+}
+
 # Update a single field in the identity cache without disturbing the others.
 # Used when a script learns something new mid-run (e.g. CACHED_DOTFILES_PATH
 # after a successful clone) that load_or_prompt_identity didn't know about.
@@ -584,34 +659,43 @@ fi
 # Step 10 & 11: Print key, open browser, prompt for upload
 # ----------------------------------------------------------------------------
 step "10-11/14: Add deploy key + upload initial files"
-echo ""
-echo "============================================================"
-echo "  PUBLIC KEY (copy this entire line):"
-echo "============================================================"
-cat "${KEY_PATH}.pub"
-echo "============================================================"
-echo ""
+
 DEPLOY_KEYS_URL="https://github.com/${REPO_USER}/${REPO_NAME}/settings/keys/new"
 REPO_PAGE_URL="https://github.com/${REPO_USER}/${REPO_NAME}"
-echo "While you're on github.com, do BOTH of these:"
+PUBKEY="$(cat "${KEY_PATH}.pub")"
+KEY_TITLE="$(hostname) - $(date +%Y-%m-%d)"
+
+# Open the deploy-keys page first so the user can switch over while we copy.
+if open_url "$DEPLOY_KEYS_URL"; then
+    info "Opened deploy keys page in your browser."
+else
+    warn "Could not auto-open browser — visit this URL manually: ${DEPLOY_KEYS_URL}"
+fi
+
+# Copy title then pubkey back-to-back. Both end up in clipboard history (no
+# intermediate prompt). Small sleep between copies so the OS clipboard
+# subsystem registers two distinct events rather than coalescing them.
+boxed_print "TITLE — copy this if the clipboard didn't grab it" "${KEY_TITLE}"
+copy_and_report "Title" "$KEY_TITLE"
+sleep 1
+boxed_print "PUBLIC KEY — copy this if the clipboard didn't grab it" "${PUBKEY}"
+copy_and_report "Public key" "$PUBKEY"
+
 echo ""
-echo "  1. Add the deploy key:"
+echo "On github.com, do BOTH of these (both title + key are in your clipboard history):"
+echo ""
+echo "  1. Add the deploy key at:"
 echo "     ${DEPLOY_KEYS_URL}"
-echo "     - Paste the key above"
+echo "     - Paste the TITLE into the 'Title' field"
+echo "     - Paste the PUBLIC KEY into the 'Key' field"
 echo "     - CHECK the 'Allow write access' box"
 echo "     - Click 'Add key'"
 echo ""
-echo "  2. Upload any initial files for this project:"
+echo "  2. Upload any initial files for this project at:"
 echo "     ${REPO_PAGE_URL}"
 echo "     - Drag and drop files into the repo"
 echo "     - Commit them via the web UI"
 echo ""
-
-if open_url "$DEPLOY_KEYS_URL"; then
-    info "Opened deploy keys page in your browser."
-else
-    warn "Could not auto-open browser — copy the URL above manually."
-fi
 
 # Use a tolerant read — if /dev/tty isn't readable (e.g. interop briefly
 # disrupted it), don't crash; just continue. User can re-run if needed.
