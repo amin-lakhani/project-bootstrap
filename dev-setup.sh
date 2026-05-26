@@ -508,10 +508,6 @@ SSH_CONFIG="${HOME}/.ssh/config"
 touch "$SSH_CONFIG"
 chmod 600 "$SSH_CONFIG"
 if ! grep -q "^Host ${DOTFILES_SSH_HOST}$" "$SSH_CONFIG"; then
-    # IdentityFile uses ~/.ssh/<key>, NOT the absolute host path. Dev
-    # containers produced by init.sh bind-mount ~/.ssh into the container at
-    # a different absolute path, but ~ resolves to the running user's home
-    # in both contexts so the same config line works.
     {
         echo ""
         echo "# Added by project-bootstrap/dev-setup.sh — read-only key for ${DOTFILES_REPO_NAME}"

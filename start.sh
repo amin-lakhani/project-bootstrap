@@ -190,7 +190,6 @@ load_or_prompt_identity() {
     export BOOTSTRAP_GH_USER_ID="$GH_USER_ID"
     export BOOTSTRAP_GIT_NAME="$GIT_NAME"
     export BOOTSTRAP_GIT_EMAIL="$GIT_EMAIL"
-    export BOOTSTRAP_REPO_NAME
 
     info "Identity: ${GIT_NAME} <${GIT_EMAIL}> (GitHub: ${GH_USER})"
 }
