@@ -607,6 +607,14 @@ info "Repo: ${REPO_USER}/${REPO_NAME}"
 # Step 7: Generate per-project SSH key
 # ----------------------------------------------------------------------------
 step "7/13: Generating SSH key"
+# The per-project key path lands on the read-only dotfiles deploy key if the
+# project happens to be named the same as DOTFILES_REPO_NAME. Refuse rather
+# than silently "reuse" a read-only key and fail later at git push.
+if [[ "$PROJECT_NAME" == "$DOTFILES_REPO_NAME" ]]; then
+    error "Project name '${PROJECT_NAME}' collides with the dotfiles deploy key"
+    error "at ~/.ssh/${PROJECT_NAME}_ed25519 (read-only). Rename the project folder."
+    exit 1
+fi
 KEY_NAME="${PROJECT_NAME}_ed25519"
 KEY_PATH="${HOME}/.ssh/${KEY_NAME}"
 mkdir -p "${HOME}/.ssh"
@@ -627,7 +635,7 @@ SSH_CONFIG="${HOME}/.ssh/config"
 touch "$SSH_CONFIG"
 chmod 600 "$SSH_CONFIG"
 
-if ! grep -q "Host ${SSH_HOST_ALIAS}$" "$SSH_CONFIG"; then
+if ! grep -q "^Host ${SSH_HOST_ALIAS}$" "$SSH_CONFIG"; then
     cat >> "$SSH_CONFIG" <<EOF
 
 Host ${SSH_HOST_ALIAS}

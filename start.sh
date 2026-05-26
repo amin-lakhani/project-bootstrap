@@ -23,6 +23,7 @@ set -euo pipefail
 # Repo names default to the canonical pair but can be overridden if you forked
 # them under different names.
 BOOTSTRAP_REPO_NAME="${BOOTSTRAP_REPO_NAME:-project-bootstrap}"
+DOTFILES_REPO_NAME="${DOTFILES_REPO_NAME:-dotfiles}"
 
 CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'
 BLUE='\033[34m'; MAGENTA='\033[35m'; NC='\033[0m'
@@ -232,9 +233,9 @@ echo ""
 prompt "Project name (lowercase, dashes ok — e.g. my-cool-thing):"
 read -r project_name < /dev/tty
 
-# Trim whitespace
-project_name="${project_name## }"
-project_name="${project_name%% }"
+# Trim leading + trailing whitespace (handles multiple spaces, tabs, etc.).
+project_name="${project_name#"${project_name%%[![:space:]]*}"}"
+project_name="${project_name%"${project_name##*[![:space:]]}"}"
 
 if [[ -z "$project_name" ]]; then
     error "Project name cannot be empty."
@@ -245,6 +246,15 @@ fi
 if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
     error "Project name must start with a lowercase letter or digit, then only"
     error "lowercase letters, digits, dots, dashes, underscores."
+    exit 1
+fi
+# Reject names that would collide with the read-only dotfiles deploy key.
+# init.sh derives the per-project SSH key as `~/.ssh/<project>_ed25519`, so a
+# project named `dotfiles` (or whatever DOTFILES_REPO_NAME is) would silently
+# "reuse" the read-only dotfiles key and fail later at git push.
+if [[ "$project_name" == "$DOTFILES_REPO_NAME" ]]; then
+    error "Project name '${project_name}' would collide with the dotfiles deploy key"
+    error "at ~/.ssh/${project_name}_ed25519 (read-only). Pick a different name."
     exit 1
 fi
 

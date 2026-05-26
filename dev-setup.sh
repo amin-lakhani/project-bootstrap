@@ -441,8 +441,9 @@ echo ""
 prompt "Name of the folder under \$HOME to use for these repos [default: ${DEFAULT_FOLDER}]:"
 read -r folder_name < /dev/tty || folder_name=""
 folder_name="${folder_name:-$DEFAULT_FOLDER}"
-folder_name="${folder_name## }"
-folder_name="${folder_name%% }"
+# Trim leading + trailing whitespace (handles multiple spaces, tabs, etc.).
+folder_name="${folder_name#"${folder_name%%[![:space:]]*}"}"
+folder_name="${folder_name%"${folder_name##*[![:space:]]}"}"
 
 # Tight regex (first char must be alnum) so destructive paths are safe.
 if [[ ! "$folder_name" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
