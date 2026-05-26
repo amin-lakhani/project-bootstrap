@@ -15,9 +15,7 @@ set -euo pipefail
 # non-interactive.
 # ============================================================================
 
-# Repo names default to the canonical pair but can be overridden if you forked
-# them under different names.
-BOOTSTRAP_REPO_NAME="${BOOTSTRAP_REPO_NAME:-project-bootstrap}"
+# Dotfiles repo name — override if your dotfiles fork has a different name.
 DOTFILES_REPO_NAME="${DOTFILES_REPO_NAME:-dotfiles}"
 
 # ----- Logging ---------------------------------------------------------------
@@ -225,9 +223,6 @@ load_or_prompt_identity() {
 }
 
 load_or_prompt_identity
-
-# Derived URL (built from resolved identity).
-BOOTSTRAP_RAW="https://raw.githubusercontent.com/${GH_USER}/${BOOTSTRAP_REPO_NAME}/main"
 
 # Try several browser-opener tools. On WSL without wslview/xdg-open,
 # falls back to cmd.exe which is always present via WSL interop.
