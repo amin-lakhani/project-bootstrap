@@ -1,6 +1,6 @@
 # project-bootstrap
 
-Per-project dev container and setup scripts. Two `curl | bash` entry points:
+Per-project setup scripts. Two `curl | bash` entry points:
 
 | Script | When to use |
 |---|---|
@@ -12,8 +12,6 @@ Per-project dev container and setup scripts. Two `curl | bash` entry points:
 ## Prerequisites
 
 - WSL2 with Ubuntu (or any Linux/macOS env for `dev-setup.sh`)
-- Docker Desktop (or compatible) for the dev containers `init.sh` produces
-- VS Code with the Dev Containers extension
 - For `start.sh` / `init.sh`: an empty GitHub repo for the new project
 
 ## Identity
@@ -74,11 +72,10 @@ It will:
 4. Make the local folder and hand off to `init.sh`, which:
    - Updates OS + npm + Claude Code
    - **Installs dotfiles**: reuses an existing checkout (recorded by `dev-setup.sh`, or at `~/.dotfiles`), or clones fresh. **Always `git pull --ff-only`s the latest** from the dotfiles remote before running `install.sh` so each new project picks up the most recent config (safe pull — local edits to the dotfiles repo, if you're iterating on it, are never clobbered; if the pull can't fast-forward, it warns and uses what's on disk). If the dotfiles repo is private and HTTPS clone fails, walks you through generating an SSH deploy key, registering it on GitHub, and retries — same recovery flow as `dev-setup.sh`. If it can't enable access, the rest of the bootstrap still runs without dotfiles.
-   - Drops a `.devcontainer/` into the folder
    - Generates a per-project read-write SSH deploy key + walks you through registering it
    - Wires up git and pulls down anything you uploaded via the web UI
 
-Then open the folder in VS Code and "Reopen in Container."
+Then open the folder in VS Code and run `claude` in the integrated terminal.
 
 ## Setting up a fresh machine
 
@@ -126,6 +123,5 @@ DEBUG=1 curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstr
 ## Files
 
 - `start.sh` — new-project wrapper, prompts for name + opens GitHub `new` page
-- `init.sh` — per-project setup (dev container + deploy key + git wiring)
+- `init.sh` — per-project setup (deploy key + git wiring)
 - `dev-setup.sh` — fresh-machine setup of the bootstrap tools
-- `.devcontainer/` — dev container template copied into new projects by `init.sh`. Preinstalled: Node.js LTS, npm, Claude Code, plus `curl` / `wget` / `git` / `gh` / `jq` / `unzip` / `zip` / `xz-utils` / `build-essential` and basic SSH/cert/GPG tooling. Bind-mounts your host `~/.gitconfig`, `~/.ssh`, and `~/.claude/{settings.json,statusline.js}` so identity flows through without being hardcoded.

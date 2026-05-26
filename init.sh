@@ -425,11 +425,6 @@ ensure_dotfiles_clone() {
     touch "$ssh_config"
     chmod 600 "$ssh_config"
     if ! grep -q "^Host ${ssh_host_alias}$" "$ssh_config"; then
-        # IdentityFile uses ~/.ssh/<key>, NOT the absolute host path. The
-        # dev container init.sh produces bind-mounts the user's ~/.ssh into
-        # /home/vscode/.ssh, so the keys exist at a different absolute path
-        # inside the container — but ~ resolves to the running user's home
-        # in both contexts.
         {
             echo ""
             echo "# Added by project-bootstrap/init.sh — read-only key for ${DOTFILES_REPO_NAME}"
@@ -512,7 +507,7 @@ info "Bootstrapping project: $PROJECT_NAME"
 # ----------------------------------------------------------------------------
 # Step 1: Update OS packages
 # ----------------------------------------------------------------------------
-step "1/14: Updating OS packages"
+step "1/13: Updating OS packages"
 sudo apt-get update && sudo apt-get upgrade -y
 
 # ----------------------------------------------------------------------------
@@ -520,7 +515,7 @@ sudo apt-get update && sudo apt-get upgrade -y
 # ----------------------------------------------------------------------------
 # Check what sudo sees, not the user's PATH — nvm-managed node lives in
 # ~/.nvm and isn't visible to root, so sudo npm install -g would fail.
-step "2/14: Ensuring system Node.js"
+step "2/13: Ensuring system Node.js"
 if ! sudo bash -c 'command -v node && command -v npm' &> /dev/null; then
     info "System Node.js/npm not found — installing LTS via NodeSource"
     curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash -
@@ -531,14 +526,14 @@ sudo npm install -g npm@latest
 # ----------------------------------------------------------------------------
 # Step 3: Install Claude Code (npm install -g is idempotent)
 # ----------------------------------------------------------------------------
-step "3/14: Installing Claude Code"
+step "3/13: Installing Claude Code"
 sudo npm install -g @anthropic-ai/claude-code
 success "Claude Code ready"
 
 # ----------------------------------------------------------------------------
 # Step 4: Dotfiles
 # ----------------------------------------------------------------------------
-step "4/14: Checking dotfiles"
+step "4/13: Checking dotfiles"
 # Resolve where dotfiles already lives (if anywhere). Priority:
 #   1. CACHED_DOTFILES_PATH from the identity cache (set by dev-setup.sh on
 #      fresh-machine setup, or by a prior init.sh run).
@@ -580,7 +575,7 @@ fi
 # Dotfiles' install.sh symlinks ~/.gitconfig to its own .gitconfig, so writing
 # `git config --global` here would silently mutate the dotfiles repo. Detect
 # that and skip — trust whatever the symlink points to.
-step "5/14: Configuring global git"
+step "5/13: Configuring global git"
 if [[ -L "${HOME}/.gitconfig" ]]; then
     info "~/.gitconfig is a symlink (managed by dotfiles) — leaving it alone"
 else
@@ -591,18 +586,9 @@ else
 fi
 
 # ----------------------------------------------------------------------------
-# Step 6: Copy .devcontainer files
+# Step 6: Get repo URL
 # ----------------------------------------------------------------------------
-step "6/14: Setting up dev container"
-mkdir -p .devcontainer
-curl -fsSL "${BOOTSTRAP_RAW}/.devcontainer/devcontainer.json" -o .devcontainer/devcontainer.json
-curl -fsSL "${BOOTSTRAP_RAW}/.devcontainer/Dockerfile" -o .devcontainer/Dockerfile
-success "Dev container files copied"
-
-# ----------------------------------------------------------------------------
-# Step 7: Get repo URL
-# ----------------------------------------------------------------------------
-step "7/14: Repository setup"
+step "6/13: Repository setup"
 DEFAULT_REPO_URL="https://github.com/${GH_USER}/${PROJECT_NAME}"
 echo "Paste the GitHub URL of your new (empty) repo, or press Enter to use:"
 echo "  ${DEFAULT_REPO_URL}"
@@ -623,9 +609,9 @@ fi
 info "Repo: ${REPO_USER}/${REPO_NAME}"
 
 # ----------------------------------------------------------------------------
-# Step 8: Generate per-project SSH key
+# Step 7: Generate per-project SSH key
 # ----------------------------------------------------------------------------
-step "8/14: Generating SSH key"
+step "7/13: Generating SSH key"
 KEY_NAME="${PROJECT_NAME}_ed25519"
 KEY_PATH="${HOME}/.ssh/${KEY_NAME}"
 mkdir -p "${HOME}/.ssh"
@@ -638,18 +624,15 @@ else
 fi
 
 # ----------------------------------------------------------------------------
-# Step 9: SSH config entry
+# Step 8: SSH config entry
 # ----------------------------------------------------------------------------
-step "9/14: Configuring SSH"
+step "8/13: Configuring SSH"
 SSH_HOST_ALIAS="github.com-${PROJECT_NAME}"
 SSH_CONFIG="${HOME}/.ssh/config"
 touch "$SSH_CONFIG"
 chmod 600 "$SSH_CONFIG"
 
 if ! grep -q "Host ${SSH_HOST_ALIAS}$" "$SSH_CONFIG"; then
-    # IdentityFile uses ~/.ssh/<key>, NOT the absolute host path — the dev
-    # container this script generates bind-mounts ~/.ssh into the container
-    # at a different absolute path, but ~ resolves correctly in both.
     cat >> "$SSH_CONFIG" <<EOF
 
 Host ${SSH_HOST_ALIAS}
@@ -664,9 +647,9 @@ else
 fi
 
 # ----------------------------------------------------------------------------
-# Step 10 & 11: Print key, open browser, prompt for upload
+# Step 9 & 10: Print key, open browser, prompt for upload
 # ----------------------------------------------------------------------------
-step "10-11/14: Add deploy key + upload initial files"
+step "9-10/13: Add deploy key + upload initial files"
 
 DEPLOY_KEYS_URL="https://github.com/${REPO_USER}/${REPO_NAME}/settings/keys/new"
 REPO_PAGE_URL="https://github.com/${REPO_USER}/${REPO_NAME}"
@@ -712,9 +695,9 @@ if ! read -p "Press Enter once BOTH the deploy key is added AND any initial file
 fi
 
 # ----------------------------------------------------------------------------
-# Step 12: Test SSH
+# Step 11: Test SSH
 # ----------------------------------------------------------------------------
-step "12/14: Testing SSH connection"
+step "11/13: Testing SSH connection"
 debug "Running: ssh -T -o StrictHostKeyChecking=accept-new git@${SSH_HOST_ALIAS}"
 SSH_TEST=$(ssh -T -o StrictHostKeyChecking=accept-new "git@${SSH_HOST_ALIAS}" < /dev/null 2>&1 || true)
 echo "$SSH_TEST"
@@ -731,9 +714,9 @@ else
 fi
 
 # ----------------------------------------------------------------------------
-# Step 13: Init local repo, set remote
+# Step 12: Init local repo, set remote
 # ----------------------------------------------------------------------------
-step "13/14: Initializing local git"
+step "12/13: Initializing local git"
 if [[ ! -d .git ]]; then
     git init -b main
 fi
@@ -746,9 +729,9 @@ fi
 success "Remote: $REMOTE_URL"
 
 # ----------------------------------------------------------------------------
-# Step 14: Pull repo contents (any files uploaded via the web UI)
+# Step 13: Pull repo contents (any files uploaded via the web UI)
 # ----------------------------------------------------------------------------
-step "14/14: Pulling repo contents"
+step "13/13: Pulling repo contents"
 git fetch origin 2>/dev/null || true
 DEFAULT_BRANCH=$(git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}' || echo "main")
 if git ls-remote --exit-code --heads origin "$DEFAULT_BRANCH" &> /dev/null; then
@@ -767,8 +750,7 @@ echo ""
 NEXT_CMD="(cd $(pwd) && code .)"
 echo "Next steps:"
 echo "  1. Open in VS Code:                 ${NEXT_CMD}"
-echo "  2. Command palette → 'Dev Containers: Reopen in Container'"
-echo "  3. Inside the container, run:       claude"
+echo "  2. In the integrated terminal, run: claude"
 echo ""
 if command -v clip.exe &> /dev/null; then
     if echo -n "${NEXT_CMD}" | clip.exe 2>/dev/null; then

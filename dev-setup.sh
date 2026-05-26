@@ -284,8 +284,6 @@ detect_env() {
     local notes=()
     [[ -n "${WSL_DISTRO_NAME:-}" ]] && notes+=("WSL=${WSL_DISTRO_NAME}")
     [[ -n "${VSCODE_IPC_HOOK_CLI:-}" ]] && notes+=("VSCode-remote")
-    [[ -n "${REMOTE_CONTAINERS:-}${CODESPACES:-}" ]] && notes+=("dev-container")
-    [[ -f /.dockerenv ]] && notes+=("docker-container")
     command -v cmd.exe &> /dev/null && notes+=("cmd.exe-present")
     command -v clip.exe &> /dev/null && notes+=("clip.exe-present")
     command -v xdg-open &> /dev/null && notes+=("xdg-open-present")
@@ -378,8 +376,7 @@ open_url() {
         fi
     fi
     # VS Code's CLI can open URLs in the host browser when running in a remote
-    # window (dev container, SSH, Codespaces). This is the right path when
-    # running inside a dev-container or remote SSH context.
+    # window (e.g. SSH). Useful when no host-side opener is available.
     if command -v code &> /dev/null; then
         if code --openExternal "$url" 2>/dev/null; then
             debug "open_url: used code --openExternal"
