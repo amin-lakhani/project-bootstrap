@@ -47,7 +47,7 @@ If you forked the bootstrap repos under different names, override these too:
 
 | Variable | Default |
 |---|---|
-| `BOOTSTRAP_REPO_NAME` | `project-bootstrap` |
+| `BOOTSTRAP_REPO_NAME` | `project-bootstrap-template` |
 | `DOTFILES_REPO_NAME` | `dotfiles` |
 | `BOOTSTRAP_WORK_DIR` | `dev_env_setup` (used as default folder name under `$HOME` in `dev-setup.sh`) |
 
@@ -60,7 +60,7 @@ GH_USER="${BOOTSTRAP_GH_USER:-}"
 [ -z "$GH_USER" ] && GH_USER="$(gh api user 2>/dev/null | grep -oE '"login":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login":[[:space:]]*"([^"]+)".*/\1/')"
 [ -z "$GH_USER" ] && GH_USER="$(git config --global user.email 2>/dev/null | sed -nE 's/^[0-9]+\+(.+)@users\.noreply\.github\.com$/\1/p')"
 [ -z "$GH_USER" ] && read -rp "GitHub username: " GH_USER
-curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap/main/start.sh" | bash
+curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap-template/main/start.sh" | bash
 ```
 
 (Set `BOOTSTRAP_GH_USER=<your-username>` to bypass detection entirely. If you forked this repo, also set `BOOTSTRAP_REPO_NAME` to your fork's name and `start.sh` will fetch the rest of the scripts from your fork.)
@@ -86,7 +86,7 @@ GH_USER="${BOOTSTRAP_GH_USER:-}"
 [ -z "$GH_USER" ] && GH_USER="$(gh api user 2>/dev/null | grep -oE '"login":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login":[[:space:]]*"([^"]+)".*/\1/')"
 [ -z "$GH_USER" ] && GH_USER="$(git config --global user.email 2>/dev/null | sed -nE 's/^[0-9]+\+(.+)@users\.noreply\.github\.com$/\1/p')"
 [ -z "$GH_USER" ] && read -rp "GitHub username: " GH_USER
-curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap/main/dev-setup.sh" | bash
+curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap-template/main/dev-setup.sh" | bash
 ```
 
 You'll be prompted for:
@@ -117,7 +117,7 @@ GH_USER="${BOOTSTRAP_GH_USER:-}"
 [ -z "$GH_USER" ] && GH_USER="$(gh api user 2>/dev/null | grep -oE '"login":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login":[[:space:]]*"([^"]+)".*/\1/')"
 [ -z "$GH_USER" ] && GH_USER="$(git config --global user.email 2>/dev/null | sed -nE 's/^[0-9]+\+(.+)@users\.noreply\.github\.com$/\1/p')"
 [ -z "$GH_USER" ] && read -rp "GitHub username: " GH_USER
-DEBUG=1 curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap/main/dev-setup.sh" | bash
+DEBUG=1 curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap-template/main/dev-setup.sh" | bash
 ```
 
 ## Files

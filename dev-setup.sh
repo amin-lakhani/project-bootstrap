@@ -24,7 +24,7 @@ DEFAULT_FOLDER="${BOOTSTRAP_WORK_DIR:-dev_env_setup}"
 # Repo names default to the canonical pair but can be overridden if you forked
 # them under different names.
 DOTFILES_REPO_NAME="${DOTFILES_REPO_NAME:-dotfiles}"
-BOOTSTRAP_REPO_NAME="${BOOTSTRAP_REPO_NAME:-project-bootstrap}"
+BOOTSTRAP_REPO_NAME="${BOOTSTRAP_REPO_NAME:-project-bootstrap-template}"
 
 # Dotfiles is private — needs a per-repo read-only deploy key (scoped, no
 # broad account access). project-bootstrap is public — anon HTTPS works.

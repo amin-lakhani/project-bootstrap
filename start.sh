@@ -22,7 +22,7 @@ set -euo pipefail
 
 # Repo names default to the canonical pair but can be overridden if you forked
 # them under different names.
-BOOTSTRAP_REPO_NAME="${BOOTSTRAP_REPO_NAME:-project-bootstrap}"
+BOOTSTRAP_REPO_NAME="${BOOTSTRAP_REPO_NAME:-project-bootstrap-template}"
 DOTFILES_REPO_NAME="${DOTFILES_REPO_NAME:-dotfiles}"
 
 CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'
