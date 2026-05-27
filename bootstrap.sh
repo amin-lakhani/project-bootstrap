@@ -573,7 +573,47 @@ setup_dotfiles() {
         info "Running ${DOTFILES_PATH}/install.sh"
         bash "${DOTFILES_PATH}/install.sh"
         update_cache_field "CACHED_DOTFILES_PATH" "$DOTFILES_PATH"
+        wire_claude_memory_symlink "$DOTFILES_PATH"
     fi
+}
+
+# Create the symlink Claude Code uses to pick up the synced memory files.
+# Claude reads memory from ~/.claude/projects/<hashed-workdir>/memory/ where
+# the hash is the absolute workdir path with `/` → `-`. The dotfiles repo
+# carries the memory files in claude-memory-bootstrap/; this symlink wires
+# them together so a fresh machine sees the synced memories on first
+# claude-code run.
+wire_claude_memory_symlink() {
+    local dotfiles_path="$1"
+    local memory_src="${dotfiles_path}/claude-memory-bootstrap"
+    if [[ ! -d "$memory_src" ]]; then
+        debug "No claude-memory-bootstrap/ dir in ${dotfiles_path} — skipping memory symlink"
+        return 0
+    fi
+    # workdir is dotfiles' parent (e.g. ~/dev for ~/dev/dotfiles-amin-lakhani)
+    local workdir
+    workdir="$(dirname "$dotfiles_path")"
+    local hash
+    hash="$(echo "$workdir" | sed 's|/|-|g')"
+    local claude_dir="${HOME}/.claude/projects/${hash}"
+    local memory_link="${claude_dir}/memory"
+    mkdir -p "$claude_dir"
+    if [[ -L "$memory_link" ]]; then
+        local current
+        current="$(readlink -f "$memory_link" 2>/dev/null || true)"
+        if [[ "$current" == "$memory_src" ]]; then
+            info "Claude memory symlink already correct — skipping"
+            return 0
+        fi
+        info "Refreshing Claude memory symlink target"
+        rm "$memory_link"
+    elif [[ -e "$memory_link" ]]; then
+        local backup="${memory_link}.backup.$(date +%Y%m%d%H%M%S)"
+        warn "Existing ${memory_link} is not a symlink — backing up to ${backup}"
+        mv "$memory_link" "$backup"
+    fi
+    ln -s "$memory_src" "$memory_link"
+    success "Claude memory: ${memory_link} → ${memory_src}"
 }
 
 # ============================================================================
