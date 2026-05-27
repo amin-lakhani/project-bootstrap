@@ -393,7 +393,7 @@ setup_dotfiles_ssh_key() {
         fi
     fi
 
-    # Browser-walk fallback (matches the old start.sh/dev-setup.sh flow)
+    # Browser-walk fallback
     local pubkey="$(cat "${key_path}.pub")"
     local key_title="$(hostname) - $(date +%Y-%m-%d) - bootstrap"
     local keys_url="https://github.com/${repo_full}/settings/keys/new"
@@ -438,7 +438,7 @@ setup_dotfiles_ssh_key() {
 # Clone an existing user's dotfiles repo (private, needs SSH deploy key).
 # Returns 0 on success, with DOTFILES_PATH set to the local checkout.
 ensure_dotfiles_clone_existing() {
-    local target="$1"   # local dest dir, e.g. ~/dev/dotfiles-jane-doe
+    local target="$1"   # local dest dir, e.g. ~/dev_env_setup/dotfiles-jane-doe
     local repo_full="${GH_USER}/${DOTFILES_REPO_NAME}"
     local alias="github.com-${DOTFILES_REPO_NAME}"
     local ssh_url="git@${alias}:${repo_full}.git"
@@ -590,7 +590,7 @@ wire_claude_memory_symlink() {
         debug "No claude-memory-bootstrap/ dir in ${dotfiles_path} — skipping memory symlink"
         return 0
     fi
-    # workdir is dotfiles' parent (e.g. ~/dev for ~/dev/dotfiles-amin-lakhani)
+    # workdir is dotfiles' parent (e.g. ~/dev_env_setup for ~/dev_env_setup/dotfiles-amin-lakhani)
     local workdir
     workdir="$(dirname "$dotfiles_path")"
     local hash

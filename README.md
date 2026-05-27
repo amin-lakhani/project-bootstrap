@@ -51,7 +51,6 @@ If you set `BOOTSTRAP_GIT_EMAIL` to anything that isn't a noreply address, every
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `BOOTSTRAP_REPO_NAME` | `project-bootstrap-template` | Override if you forked this repo under a different name |
 | `DOTFILES_REPO_NAME` | `dotfiles-${GH_USER}` | Your per-user dotfiles repo name |
 | `DOTFILES_TEMPLATE_OWNER` | `amin-lakhani` | Owner of the template to "Use template" from |
 | `DOTFILES_TEMPLATE_NAME` | `dotfiles-template` | Repo name of the template |
