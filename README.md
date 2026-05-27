@@ -20,7 +20,7 @@ GH_USER="${BOOTSTRAP_GH_USER:-}"
 curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap-template/main/bootstrap.sh" | bash
 ```
 
-Set `BOOTSTRAP_GH_USER=<your-username>` ahead of time to skip the detection. If you forked this repo and want to fetch the script from your own fork, also set `BOOTSTRAP_REPO_NAME=<your-fork-name>`.
+Set `BOOTSTRAP_GH_USER=<your-username>` ahead of time to skip the detection. If you forked this repo under a different name and want to fetch `bootstrap.sh` from your own fork, change the URL in the snippet directly — the snippet hardcodes `project-bootstrap-template` as the path.
 
 ## What it does, depending on where you run it
 

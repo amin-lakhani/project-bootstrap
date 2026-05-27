@@ -20,7 +20,6 @@ set -euo pipefail
 # ============================================================================
 
 # ----- Constants ------------------------------------------------------------
-BOOTSTRAP_REPO_NAME="${BOOTSTRAP_REPO_NAME:-project-bootstrap-template}"
 DOTFILES_TEMPLATE_OWNER="${DOTFILES_TEMPLATE_OWNER:-amin-lakhani}"
 DOTFILES_TEMPLATE_NAME="${DOTFILES_TEMPLATE_NAME:-dotfiles-template}"
 DEFAULT_WORK_DIR="${BOOTSTRAP_WORK_DIR:-dev_env_setup}"
@@ -483,7 +482,6 @@ ensure_dotfiles_from_template() {
     fi
 
     # Verify the repo exists before proceeding (handles both gh-success and pre-existing cases)
-    local probe_url="https://api.github.com/repos/${repo_full}"
     local check_url="https://github.com/${repo_full}"
 
     # If still not there, walk through browser
@@ -550,6 +548,8 @@ setup_dotfiles() {
 
         case "${choice,,}" in
             1)
+                # gh auth lets us register the deploy key without the browser walk
+                ensure_gh_auth || true
                 if ensure_dotfiles_clone_existing "$target"; then
                     DOTFILES_PATH="$target"
                 fi
@@ -702,6 +702,11 @@ EOF
     step "6/9: Register deploy key + upload starter files"
     local deploy_keys_url="https://github.com/${repo_user}/${repo_name}/settings/keys/new"
     local repo_page_url="https://github.com/${repo_user}/${repo_name}"
+
+    # Try to enable the gh fast path. If user already has it or chooses to log in,
+    # gh handles deploy-key registration in one command; otherwise we fall back
+    # to the browser walk below.
+    ensure_gh_auth || true
 
     if (( GH_AUTH_ACTIVE == 1 )); then
         info "Registering deploy key via gh..."
