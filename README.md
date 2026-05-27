@@ -1,127 +1,108 @@
-# project-bootstrap
+# project-bootstrap-template
 
-Per-project setup scripts. Two `curl | bash` entry points:
+A one-script bootstrap for new projects and new machines that wires up:
+- a per-user dotfiles repo (cloned, or created from [`dotfiles-template`](https://github.com/amin-lakhani/dotfiles-template))
+- a per-project SSH deploy key with deploy-key registration on GitHub
+- Node.js + Claude Code on the host
+- git remote + initial pull
 
-| Script | When to use |
-|---|---|
-| `start.sh` | Starting a **new project** on a machine that's already set up |
-| `dev-setup.sh` | **Fresh machine** — set up the bootstrap tools themselves (clones `dotfiles` + `project-bootstrap`) |
+Marked as a [GitHub Template repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template) — click **Use this template** above to fork it under your own account, or just use it directly via the curl snippet below.
 
-(`init.sh` is what `start.sh` calls under the hood — don't invoke it directly.)
+## Quickstart
 
-## Prerequisites
+Paste this into your terminal — it detects your GitHub username from `gh` CLI or your noreply-format `~/.gitconfig`, prompts if neither is set up, then runs `bootstrap.sh` from the canonical fork:
 
-- WSL2 with Ubuntu (or any Linux/macOS env for `dev-setup.sh`)
-- For `start.sh` / `init.sh`: an empty GitHub repo for the new project
+```bash
+GH_USER="${BOOTSTRAP_GH_USER:-}"
+[ -z "$GH_USER" ] && GH_USER="$(gh api user 2>/dev/null | grep -oE '"login":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login":[[:space:]]*"([^"]+)".*/\1/')"
+[ -z "$GH_USER" ] && GH_USER="$(git config --global user.email 2>/dev/null | sed -nE 's/^[0-9]+\+(.+)@users\.noreply\.github\.com$/\1/p')"
+[ -z "$GH_USER" ] && read -rp "GitHub username: " GH_USER
+curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap-template/main/bootstrap.sh" | bash
+```
+
+Set `BOOTSTRAP_GH_USER=<your-username>` ahead of time to skip the detection. If you forked this repo and want to fetch the script from your own fork, also set `BOOTSTRAP_REPO_NAME=<your-fork-name>`.
+
+## What it does, depending on where you run it
+
+`bootstrap.sh` detects the state of your machine + current directory and branches:
+
+| State | Trigger | What happens |
+|---|---|---|
+| **Fresh machine** | No dotfiles checkout found anywhere | Resolves identity → prompts: clone existing `dotfiles-<username>` OR create new from `dotfiles-template` OR skip. Walks through deploy key registration. Runs `install.sh`. Offers to chain into project setup. |
+| **In an empty project folder** | cwd is somewhere under `$HOME` (not the workdir root) and has no `.git` | Skips dotfiles (already set up) and runs per-project setup: OS updates → Node.js + Claude Code → git config → per-project SSH key → deploy-key registration → `git init` → pull starter files. |
+| **Ambiguous** | Dotfiles set up but cwd doesn't look project-shaped | Shows a menu: [1] project setup, [2] re-install dotfiles, [q] quit. |
 
 ## Identity
 
-On first run the scripts ask for two things:
-- **GitHub username** — used for clone URLs and as the GitHub noreply email handle
-- **Git author name** — what appears as the author of every commit
+`bootstrap.sh` resolves four identity values for you. First non-empty wins:
 
-If you're already signed into GitHub locally, each prompt is pre-filled with a detected default — press **Enter to accept** or type a different value. Detection sources (in order):
-- `gh` CLI (`gh api user`) if it's installed and authenticated
-- `~/.gitconfig` — the username is recovered from `user.email` if it's in GitHub's `<id>+<user>@users.noreply.github.com` form; the author name is taken from `user.name` directly
-
-If nothing is detected, the prompt is just blank — type your answer.
-
-Everything else is derived:
-- **Numeric GitHub user ID** is fetched from the public GitHub API (`https://api.github.com/users/<your-username>`) so you never have to look it up.
-- **Git email** is always derived as `<id>+<user>@users.noreply.github.com` (GitHub's noreply format). This is the whole point: no chance of a real address slipping into a public commit by accident — there's no prompt to mis-type into.
-
-Both confirmed answers are cached at `$XDG_CONFIG_HOME/project-bootstrap/user.env` (defaults to `~/.config/project-bootstrap/user.env`). Subsequent runs are silent.
-
-You can pre-seed any/all of these via environment variables (skips the corresponding prompt or fetch):
-
-| Variable | Example |
+| Field | Sources (in priority order) |
 |---|---|
-| `BOOTSTRAP_GH_USER` | `jane-doe` |
-| `BOOTSTRAP_GH_USER_ID` | `12345678` (only needed if offline / API rate-limited) |
-| `BOOTSTRAP_GIT_NAME` | `Jane Doe` |
-| `BOOTSTRAP_GIT_EMAIL` | `12345678+jane-doe@users.noreply.github.com` |
+| `GH_USER` | `BOOTSTRAP_GH_USER` env var → cache → `gh api user` → noreply-email parse from `~/.gitconfig` → prompt with detected default |
+| `GH_USER_ID` | `BOOTSTRAP_GH_USER_ID` env var → cache → **auto-fetch from `api.github.com/users/<user>`** → prompt only on fetch failure |
+| `GIT_NAME` | `BOOTSTRAP_GIT_NAME` env var → cache → `gh api user`'s name → `git config --global user.name` → prompt with detected default |
+| `GIT_EMAIL` | `BOOTSTRAP_GIT_EMAIL` env var → cache → **always derived** as `<id>+<user>@users.noreply.github.com` (no prompt — eliminates real-email leak risk) |
 
-If you set `BOOTSTRAP_GIT_EMAIL` to anything that isn't a `@users.noreply.github.com` address, the scripts will emit a warning on every run pointing out the public-exposure risk — but won't block you. To get back to the safe noreply default, clear the env var and delete the cache file.
+Cached at `$XDG_CONFIG_HOME/project-bootstrap/user.env` (defaults to `~/.config/project-bootstrap/user.env`) after first resolution. Subsequent runs are silent.
 
-If you forked the bootstrap repos under different names, override these too:
+If you set `BOOTSTRAP_GIT_EMAIL` to anything that isn't a noreply address, every run emits a warning about public-exposure risk.
 
-| Variable | Default |
-|---|---|
-| `BOOTSTRAP_REPO_NAME` | `project-bootstrap-template` |
-| `DOTFILES_REPO_NAME` | `dotfiles` |
-| `BOOTSTRAP_WORK_DIR` | `dev_env_setup` (used as default folder name under `$HOME` in `dev-setup.sh`) |
+## Other env vars worth knowing
 
-## Starting a new project
+| Variable | Default | Purpose |
+|---|---|---|
+| `BOOTSTRAP_REPO_NAME` | `project-bootstrap-template` | Override if you forked this repo under a different name |
+| `DOTFILES_REPO_NAME` | `dotfiles-${GH_USER}` | Your per-user dotfiles repo name |
+| `DOTFILES_TEMPLATE_OWNER` | `amin-lakhani` | Owner of the template to "Use template" from |
+| `DOTFILES_TEMPLATE_NAME` | `dotfiles-template` | Repo name of the template |
+| `BOOTSTRAP_WORK_DIR` | `dev_env_setup` | Folder name under `$HOME` for the dotfiles checkout. Existing `~/dev/` or `~/development/` is reused if present. |
 
-Paste and run — the snippet detects your GitHub username from `gh` CLI or your `~/.gitconfig` (the noreply email), and only prompts if neither is set up:
+## `gh` CLI usage + auto-cleanup
 
-```bash
-GH_USER="${BOOTSTRAP_GH_USER:-}"
-[ -z "$GH_USER" ] && GH_USER="$(gh api user 2>/dev/null | grep -oE '"login":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login":[[:space:]]*"([^"]+)".*/\1/')"
-[ -z "$GH_USER" ] && GH_USER="$(git config --global user.email 2>/dev/null | sed -nE 's/^[0-9]+\+(.+)@users\.noreply\.github\.com$/\1/p')"
-[ -z "$GH_USER" ] && read -rp "GitHub username: " GH_USER
-curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap-template/main/start.sh" | bash
-```
+If `gh` (the GitHub CLI) is installed, `bootstrap.sh` uses it for:
+- Creating your dotfiles repo from the template (`gh repo create --template`)
+- Registering deploy keys (`gh repo deploy-key add`)
 
-(Set `BOOTSTRAP_GH_USER=<your-username>` to bypass detection entirely. If you forked this repo, also set `BOOTSTRAP_REPO_NAME` to your fork's name and `start.sh` will fetch the rest of the scripts from your fork.)
+This is dramatically smoother than the browser-walk fallback. If `gh` isn't installed or you haven't authenticated, the script falls back to opening the relevant GitHub pages in your browser for you to click through.
 
-It will:
-1. Resolve identity (env vars / cache / prompt) and write to the cache
-2. Ask for the project name
-3. Open `github.com/new` with the name pre-filled — click Create (you can also use the page's "uploading an existing file" link to drop in starter files)
-4. Make the local folder and hand off to `init.sh`, which:
-   - Updates OS + npm + Claude Code
-   - **Installs dotfiles**: reuses an existing checkout (recorded by `dev-setup.sh`, or at `~/.dotfiles`), or clones fresh. **Always `git pull --ff-only`s the latest** from the dotfiles remote before running `install.sh` so each new project picks up the most recent config (safe pull — local edits to the dotfiles repo, if you're iterating on it, are never clobbered; if the pull can't fast-forward, it warns and uses what's on disk). If the dotfiles repo is private and HTTPS clone fails, walks you through generating an SSH deploy key, registering it on GitHub, and retries — same recovery flow as `dev-setup.sh`. If it can't enable access, the rest of the bootstrap still runs without dotfiles.
-   - Generates a per-project read-write SSH deploy key + walks you through registering it
-   - Wires up git and pulls down anything you uploaded via the web UI
+**Important security behavior** when `gh` is used:
 
-Then open the folder in VS Code and run `claude` in the integrated terminal.
+- `bootstrap.sh` runs `gh auth login` if you're not already authed
+- A trap fires at script exit (success OR crash) that ALWAYS runs `gh auth logout` — wiping the local credential regardless of whether the script created it or it pre-existed
+- The browser is then opened to `https://github.com/settings/applications` and a red warning prints, strongly suggesting you also revoke the OAuth grant on GitHub itself (the `gh auth logout` only removes the local copy; the grant on GitHub persists until you revoke it)
 
-## Setting up a fresh machine
-
-When you want to work on these bootstrap tools themselves on a brand new machine. On a fresh machine you almost certainly don't have `gh` configured or a noreply `~/.gitconfig` yet, so this snippet will prompt for your username — the detection chain is here for symmetry with the new-project snippet:
-
-```bash
-GH_USER="${BOOTSTRAP_GH_USER:-}"
-[ -z "$GH_USER" ] && GH_USER="$(gh api user 2>/dev/null | grep -oE '"login":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login":[[:space:]]*"([^"]+)".*/\1/')"
-[ -z "$GH_USER" ] && GH_USER="$(git config --global user.email 2>/dev/null | sed -nE 's/^[0-9]+\+(.+)@users\.noreply\.github\.com$/\1/p')"
-[ -z "$GH_USER" ] && read -rp "GitHub username: " GH_USER
-curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap-template/main/dev-setup.sh" | bash
-```
-
-You'll be prompted for:
-- Identity (first run only — cached after that; see [Identity](#identity))
-- Work directory name under `$HOME` (default: `dev_env_setup`, override with `BOOTSTRAP_WORK_DIR`)
-- A **read-only deploy key** scoped to the `dotfiles` repo — auto-generated, with title + pubkey copied to your clipboard (back-to-back, both live in clipboard history) and a browser walk-through. The SSH-auth check loops up to 3 times so you can fix a missing key without re-running the whole script.
-
-When done you'll have:
-- `~/<dir>/dotfiles/` — cloned via the deploy key (read-only on this machine), and the path is recorded in the identity cache so `init.sh` finds it on later per-project runs
-- `~/<dir>/project-bootstrap/` — cloned anon HTTPS (it's public)
-- A symlink wiring Claude Code's memory to the synced files in the dotfiles repo
+If you have pre-existing `gh auth` you don't want wiped, you have 3 seconds at the start of the script to Ctrl-C.
 
 ## Security model
 
-Every credential generated by these scripts is **scoped to a single repo**:
+Every credential generated by `bootstrap.sh` is **scoped to a single repo**:
 
-- `dev-setup.sh` → read-only deploy key for `dotfiles` only (`~/.ssh/<dotfiles-repo-name>_ed25519`)
-- `init.sh` → per-project read/write deploy key for the new project repo (`~/.ssh/<project>_ed25519`)
+- The dotfiles deploy key is read-only and scoped to your `dotfiles-<username>` repo
+- Each per-project deploy key is read/write and scoped to that one project repo
+- `gh` auth (if used) is wiped from disk when the script exits
 
-No user-account SSH keys, no PATs. Blast radius = one repo per key. If you need to edit + push to `dotfiles` from a secondary machine, do it via a separately-set-up auth path (VS Code OAuth, a per-machine write deploy key, etc.) — `dev-setup.sh` deliberately doesn't grant that.
+Combined: no broad-access user-account tokens persist on the machine after bootstrap. Blast radius = one repo per key.
+
+## Sharing this with a class or other users
+
+Two paths:
+
+1. **Beginner**: send students the quickstart snippet above with `<username>` replaced by your own (so they fetch *your* canonical `bootstrap.sh`). They run it, get prompted for their identity, walked through creating a `dotfiles-<their-username>` from the template, and end up with their own private dotfiles + a project-ready machine. They never touch your private repos.
+2. **Advanced**: have them fork both `project-bootstrap-template` and `dotfiles-template` under their own account. They customize freely. The `gh auth` cleanup + browser walks all still work.
 
 ## Logs
 
-All scripts tee their output to `$HOME/.cache/project-bootstrap/<script>-<timestamp>.log`. Each run prints the log path at start and (on error) end. Set `DEBUG=1` before the snippet to enable `set -x` tracing — just prefix the `curl` line:
+Every run tees output to `$HOME/.cache/project-bootstrap/bootstrap-<timestamp>.log`. Set `DEBUG=1` before the snippet for `set -x` tracing:
 
 ```bash
 GH_USER="${BOOTSTRAP_GH_USER:-}"
 [ -z "$GH_USER" ] && GH_USER="$(gh api user 2>/dev/null | grep -oE '"login":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"login":[[:space:]]*"([^"]+)".*/\1/')"
 [ -z "$GH_USER" ] && GH_USER="$(git config --global user.email 2>/dev/null | sed -nE 's/^[0-9]+\+(.+)@users\.noreply\.github\.com$/\1/p')"
 [ -z "$GH_USER" ] && read -rp "GitHub username: " GH_USER
-DEBUG=1 curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap-template/main/dev-setup.sh" | bash
+DEBUG=1 curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstrap-template/main/bootstrap.sh" | bash
 ```
 
 ## Files
 
-- `start.sh` — new-project wrapper, prompts for name + opens GitHub `new` page
-- `init.sh` — per-project setup (deploy key + git wiring)
-- `dev-setup.sh` — fresh-machine setup of the bootstrap tools
+- `bootstrap.sh` — the single entry point (~830 lines, structured into clearly-delimited sections: logging, browser/clipboard helpers, identity, gh auth + cleanup trap, dotfiles flow, per-project setup, state detection, main)
+- `README.md` — this file
