@@ -530,7 +530,7 @@ setup_dotfiles() {
         # Need to set up — prompt
         local work_dir="${HOME}/${DEFAULT_WORK_DIR}"
         # Use existing workdir if present (don't surprise the user with a new one)
-        for candidate in "${HOME}/dev" "${HOME}/development" "${HOME}/${DEFAULT_WORK_DIR}"; do
+        for candidate in "${HOME}/${DEFAULT_WORK_DIR}" "${HOME}/development"; do
             if [[ -d "$candidate" ]]; then work_dir="$candidate"; break; fi
         done
         mkdir -p "$work_dir"

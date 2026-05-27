@@ -55,7 +55,7 @@ If you set `BOOTSTRAP_GIT_EMAIL` to anything that isn't a noreply address, every
 | `DOTFILES_REPO_NAME` | `dotfiles-${GH_USER}` | Your per-user dotfiles repo name |
 | `DOTFILES_TEMPLATE_OWNER` | `amin-lakhani` | Owner of the template to "Use template" from |
 | `DOTFILES_TEMPLATE_NAME` | `dotfiles-template` | Repo name of the template |
-| `BOOTSTRAP_WORK_DIR` | `dev_env_setup` | Folder name under `$HOME` for the dotfiles checkout. Existing `~/dev/` or `~/development/` is reused if present. |
+| `BOOTSTRAP_WORK_DIR` | `dev_env_setup` | Folder name under `$HOME` for the dotfiles checkout. An existing `~/development/` is reused if present. |
 
 ## `gh` CLI usage + auto-cleanup
 
@@ -104,5 +104,5 @@ DEBUG=1 curl -fsSL "https://raw.githubusercontent.com/${GH_USER}/project-bootstr
 
 ## Files
 
-- `bootstrap.sh` — the single entry point (~830 lines, structured into clearly-delimited sections: logging, browser/clipboard helpers, identity, gh auth + cleanup trap, dotfiles flow, per-project setup, state detection, main)
+- `bootstrap.sh` — the single entry point (~875 lines, structured into clearly-delimited sections: logging, browser/clipboard helpers, identity, gh auth + cleanup trap, dotfiles flow, per-project setup, state detection, main)
 - `README.md` — this file
