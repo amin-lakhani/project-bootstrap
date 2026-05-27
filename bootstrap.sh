@@ -518,6 +518,13 @@ setup_dotfiles() {
 
     # Already on disk?
     DOTFILES_PATH=""
+    # If the cache points somewhere that no longer exists (workdir renamed,
+    # checkout deleted), say so loudly before falling through — silent
+    # fallthrough is the bug class that "no other machine has /dev" cleanup
+    # was meant to prevent.
+    if [[ -n "${CACHED_DOTFILES_PATH:-}" && ! -d "${CACHED_DOTFILES_PATH}/.git" ]]; then
+        warn "CACHED_DOTFILES_PATH='${CACHED_DOTFILES_PATH}' no longer has a checkout (renamed or deleted). Re-discovering and updating the cache."
+    fi
     if [[ -n "${CACHED_DOTFILES_PATH:-}" && -d "${CACHED_DOTFILES_PATH}/.git" ]]; then
         DOTFILES_PATH="$CACHED_DOTFILES_PATH"
         success "Dotfiles already at ${DOTFILES_PATH} (from cache)"
