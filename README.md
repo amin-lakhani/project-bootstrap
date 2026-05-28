@@ -28,9 +28,11 @@ Set `BOOTSTRAP_GH_USER=<your-username>` ahead of time to skip the detection. If 
 
 | State | Trigger | What happens |
 |---|---|---|
-| **Fresh machine** | No dotfiles checkout found anywhere | Resolves identity → prompts: clone existing `dotfiles-<username>` OR create new from `dotfiles-template` OR skip. Walks through deploy key registration. Runs `install.sh`. Offers to chain into project setup. |
-| **In an empty project folder** | cwd is somewhere under `$HOME` (not the workdir root) and has no `.git` | Skips dotfiles (already set up) and runs per-project setup: OS updates → Node.js + Claude Code → git config → per-project SSH key → deploy-key registration → `git init` → pull starter files. |
-| **Ambiguous** | Dotfiles set up but cwd doesn't look project-shaped | Shows a menu: [1] project setup, [2] re-install dotfiles, [q] quit. |
+| **Fresh machine** | No dotfiles checkout found anywhere | Resolves identity → prompts: clone existing `dotfiles-<username>` OR create new from `dotfiles-template` OR skip. Walks through deploy key registration. Runs `install.sh`. Offers to chain into a new project (prompts for name + location, default base `~/dev_code/`). |
+| **In an empty project folder** | cwd is somewhere under `$HOME` (not the workdir root) and has no `.git` | Skips dotfiles (already set up) and runs per-project setup against cwd: OS updates → Node.js + Claude Code → git config → per-project SSH key → deploy-key registration → `git init` → pull starter files. |
+| **Ambiguous** | Dotfiles set up but cwd doesn't look project-shaped | Shows a menu: [1] new project (prompts for name + location, default base `~/dev_code/`), [2] re-install dotfiles, [q] quit. |
+
+When [1] is chosen (from a fresh-machine chain or the ambiguous menu), `bootstrap.sh` prompts: "**Project folder name**" (lowercase letters/digits/`._-`), then shows the default location `~/dev_code/<name>` — press Enter to accept, or type an alternative absolute path (`~` allowed). The folder is `mkdir -p`'d, the script `cd`'s in, and per-project setup runs from there. Re-running the script for a new project goes in the right place automatically.
 
 ## Identity
 
@@ -55,6 +57,7 @@ If you set `BOOTSTRAP_GIT_EMAIL` to anything that isn't a noreply address, every
 | `DOTFILES_TEMPLATE_OWNER` | `amin-lakhani` | Owner of the template to "Use template" from |
 | `DOTFILES_TEMPLATE_NAME` | `dotfiles-template` | Repo name of the template |
 | `BOOTSTRAP_WORK_DIR` | `dev_env_setup` | Folder name under `$HOME` for the dotfiles checkout. An existing `~/development/` is reused if present. |
+| `BOOTSTRAP_CODE_DIR` | `~/dev_code` | Default base directory for **new project setups**. When you pick "Set up a new project" (from fresh-machine flow or ambiguous menu), the default location is `${BOOTSTRAP_CODE_DIR}/<name>`. You can still override per-project at the prompt. |
 
 ## `gh` CLI usage + auto-cleanup
 

@@ -23,6 +23,8 @@ set -euo pipefail
 DOTFILES_TEMPLATE_OWNER="${DOTFILES_TEMPLATE_OWNER:-amin-lakhani}"
 DOTFILES_TEMPLATE_NAME="${DOTFILES_TEMPLATE_NAME:-dotfiles-template}"
 DEFAULT_WORK_DIR="${BOOTSTRAP_WORK_DIR:-dev_env_setup}"
+# Default base under $HOME for new per-project setups. Override via env var.
+DEFAULT_CODE_DIR="${BOOTSTRAP_CODE_DIR:-${HOME}/dev_code}"
 
 # ----- ANSI colors ----------------------------------------------------------
 CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'
@@ -629,6 +631,67 @@ wire_claude_memory_symlink() {
 # ============================================================================
 # PER-PROJECT SETUP (formerly init.sh)
 # ============================================================================
+
+# Asks the user for a project folder name and resolves where it should live.
+# Default location is ${DEFAULT_CODE_DIR}/<name>. User can press Enter to
+# accept, or type an alternative absolute path (with `~` allowed). mkdir -p's
+# the resolved location and sets PROJECT_PATH for the caller.
+#
+# Returns 0 on success (PROJECT_PATH set); 1 on user cancel / bad input
+# (PROJECT_PATH cleared).
+PROJECT_PATH=""
+prompt_for_project_location() {
+    PROJECT_PATH=""
+    local pname="" input="" target=""
+
+    while :; do
+        prompt "Project folder name (lowercase, e.g. 'my-thing'):"
+        read -r pname < /dev/tty || return 1
+        pname="${pname#"${pname%%[![:space:]]*}"}"
+        pname="${pname%"${pname##*[![:space:]]}"}"
+        if [[ -z "$pname" ]]; then
+            warn "Name can't be empty. Try again or Ctrl-C to bail."
+            continue
+        fi
+        if [[ ! "$pname" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+            warn "Use lowercase alphanumerics and . _ - (must start with alnum). Try again."
+            continue
+        fi
+        if [[ "$pname" == "$DOTFILES_REPO_NAME" ]]; then
+            warn "Name '${pname}' would collide with the dotfiles deploy key. Pick something else."
+            continue
+        fi
+        break
+    done
+
+    local default_path="${DEFAULT_CODE_DIR}/${pname}"
+    info "Default location: ${default_path}"
+    prompt "Press Enter to accept, or type an alternative ABSOLUTE path (~ is allowed):"
+    read -r input < /dev/tty || return 1
+    input="${input#"${input%%[![:space:]]*}"}"
+    input="${input%"${input##*[![:space:]]}"}"
+    target="${input:-$default_path}"
+    # Expand leading ~ ourselves (read doesn't do shell expansion)
+    target="${target/#\~/$HOME}"
+
+    if [[ "$target" != /* ]]; then
+        error "Path must be absolute (start with / or ~). Got: '${input}'"
+        return 1
+    fi
+    if [[ -e "$target" && ! -d "$target" ]]; then
+        error "Path exists but is not a directory: ${target}"
+        return 1
+    fi
+    if [[ -d "${target}/.git" ]]; then
+        error "Path already contains a git repository (${target}/.git). Pick a different folder or run inside it."
+        return 1
+    fi
+
+    mkdir -p "$target" || { error "Could not create ${target}"; return 1; }
+    success "Project folder ready: ${target}"
+    PROJECT_PATH="$target"
+}
+
 project_setup() {
     local project_name="$(basename "$(pwd)")"
     step "Per-project setup for: ${project_name}"
@@ -849,15 +912,11 @@ main() {
             setup_dotfiles
             echo ""
             if prompt_yn "Set up a new project now?" "N"; then
-                warn "To set up a project, cd into the project folder first (or create one)."
-                local pname=""
-                read -r -p "Project folder name (will be created under \$HOME if it doesn't exist): " pname < /dev/tty || pname=""
-                if [[ -n "$pname" && "$pname" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
-                    mkdir -p "${HOME}/${pname}"
-                    cd "${HOME}/${pname}"
+                if prompt_for_project_location; then
+                    cd "$PROJECT_PATH"
                     project_setup
                 else
-                    info "Skipping project setup. Re-run from inside the project folder when ready."
+                    info "Skipping project setup. Re-run when ready."
                 fi
             fi
             ;;
@@ -866,14 +925,19 @@ main() {
             ;;
         ambiguous)
             echo ""
-            echo "  [1] Set up a new project (cd into the empty project folder first)"
-            echo "  [2] Re-install dotfiles (re-run install.sh after changes)"
+            echo "  [1] Set up a new project  (you'll be asked for a name + location; default base is ${DEFAULT_CODE_DIR})"
+            echo "  [2] Re-install dotfiles   (re-run install.sh after changes)"
             echo "  [q] Quit"
             prompt "Choice: "
             local choice=""
             read -r choice < /dev/tty || choice="q"
             case "$choice" in
-                1) project_setup ;;
+                1)
+                    if prompt_for_project_location; then
+                        cd "$PROJECT_PATH"
+                        project_setup
+                    fi
+                    ;;
                 2) setup_dotfiles ;;
                 *) info "Quit." ;;
             esac
