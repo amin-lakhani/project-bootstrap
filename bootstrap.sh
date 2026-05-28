@@ -586,10 +586,12 @@ setup_dotfiles() {
 
 # Create the symlink Claude Code uses to pick up the synced memory files.
 # Claude reads memory from ~/.claude/projects/<hashed-workdir>/memory/ where
-# the hash is the absolute workdir path with `/` → `-`. The dotfiles repo
-# carries the memory files in claude-memory-bootstrap/; this symlink wires
-# them together so a fresh machine sees the synced memories on first
-# claude-code run.
+# the hash is the absolute workdir path with `/` AND `_` both mapped to `-`
+# (verified empirically — Claude Code normalizes underscores too, so a workdir
+# like ~/dev_env_setup encodes to -home-<user>-dev-env-setup, not
+# -home-<user>-dev_env_setup). The dotfiles repo carries the memory files in
+# claude-memory-bootstrap/; this symlink wires them together so a fresh
+# machine sees the synced memories on first claude-code run.
 wire_claude_memory_symlink() {
     local dotfiles_path="$1"
     local memory_src="${dotfiles_path}/claude-memory-bootstrap"
@@ -601,7 +603,7 @@ wire_claude_memory_symlink() {
     local workdir
     workdir="$(dirname "$dotfiles_path")"
     local hash
-    hash="$(echo "$workdir" | sed 's|/|-|g')"
+    hash="$(echo "$workdir" | sed 's|/|-|g; s|_|-|g')"
     local claude_dir="${HOME}/.claude/projects/${hash}"
     local memory_link="${claude_dir}/memory"
     mkdir -p "$claude_dir"
