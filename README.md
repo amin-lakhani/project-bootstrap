@@ -32,7 +32,7 @@ Set `BOOTSTRAP_GH_USER=<your-username>` ahead of time to skip the detection. If 
 | **In an empty project folder** | cwd is somewhere under `$HOME` (not the workdir root) and has no `.git` | Skips dotfiles (already set up) and runs per-project setup against cwd: OS updates → Node.js + Claude Code → git config → per-project SSH key → deploy-key registration → `git init` → pull starter files. |
 | **Ambiguous** | Dotfiles set up but cwd doesn't look project-shaped | Shows a menu: [1] new project (prompts for name + location, default base `~/dev_code/`), [2] re-install dotfiles, [q] quit. |
 
-When [1] is chosen (from a fresh-machine chain or the ambiguous menu), `bootstrap.sh` prompts: "**Project folder name**" (lowercase letters/digits/`._-`), then shows the default location `~/dev_code/<name>` — press Enter to accept, or type an alternative absolute path (`~` allowed). The folder is `mkdir -p`'d, the script `cd`'s in, and per-project setup runs from there. Re-running the script for a new project goes in the right place automatically.
+When [1] is chosen (from a fresh-machine chain or the ambiguous menu), `bootstrap.sh` prompts: "**Project folder name**" (lowercase letters/digits/`._-`), then shows the default location `~/dev_code/<name>` — press Enter to accept, or type an alternative absolute path (`~` allowed). If the path doesn't exist it's `mkdir -p`'d; an existing dir is accepted as long as it doesn't already contain a `.git` (lets you layer bootstrap onto a folder you've pre-populated with starter files). The script then `cd`s in and runs per-project setup. `$HOME` and `/` are rejected — must be a real sub-directory. Re-running the script for a new project goes in the right place automatically.
 
 ## Identity
 

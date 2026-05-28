@@ -634,11 +634,19 @@ wire_claude_memory_symlink() {
 
 # Asks the user for a project folder name and resolves where it should live.
 # Default location is ${DEFAULT_CODE_DIR}/<name>. User can press Enter to
-# accept, or type an alternative absolute path (with `~` allowed). mkdir -p's
-# the resolved location and sets PROJECT_PATH for the caller.
+# accept, or type an alternative absolute path (with `~` allowed). If the
+# target doesn't exist it's mkdir -p'd; existing dirs without `.git` are
+# accepted (lets you layer bootstrap on top of a pre-populated folder).
+# Sets PROJECT_PATH for the caller.
 #
 # Returns 0 on success (PROJECT_PATH set); 1 on user cancel / bad input
 # (PROJECT_PATH cleared).
+#
+# IMPORTANT: this helper returns 1 on validation failure. ONLY call it
+# from a tested context (`if prompt_for_project_location; then ...`) —
+# bash suppresses the ERR trap for conditional returns. Calling it
+# unconditionally would let `set -euo pipefail` exit the whole script
+# on the first validation failure.
 PROJECT_PATH=""
 prompt_for_project_location() {
     PROJECT_PATH=""
@@ -673,9 +681,18 @@ prompt_for_project_location() {
     target="${input:-$default_path}"
     # Expand leading ~ ourselves (read doesn't do shell expansion)
     target="${target/#\~/$HOME}"
+    # Strip trailing slash so $HOME/ compares equal to $HOME for the guard below
+    target="${target%/}"
 
     if [[ "$target" != /* ]]; then
         error "Path must be absolute (start with / or ~). Got: '${input}'"
+        return 1
+    fi
+    # Reject targets that would scope project-setup at $HOME or root —
+    # `git init` against $HOME is almost never what you want and is a real
+    # footgun if you happen to type ~ or / at the prompt.
+    if [[ "$target" == "$HOME" || "$target" == "" || "$target" == "/" ]]; then
+        error "Target must be a sub-directory, not \$HOME or filesystem root. Got: '${input}' (resolved to '${target:-/}')"
         return 1
     fi
     if [[ -e "$target" && ! -d "$target" ]]; then
