@@ -545,9 +545,10 @@ setup_dotfiles() {
 
         echo ""
         info "No dotfiles checkout found on this machine."
-        echo "  [1] Clone existing repo ${GH_USER}/${DOTFILES_REPO_NAME}  (default — pick if you've set this up before)"
-        echo "  [2] Create new from template ${DOTFILES_TEMPLATE_OWNER}/${DOTFILES_TEMPLATE_NAME}  (first-time setup)"
-        echo "  [s] Skip dotfiles for this machine"
+        echo "  Does a dotfiles repo already exist on GitHub under your account?"
+        echo "    [1] Yes — clone ${GH_USER}/${DOTFILES_REPO_NAME} onto this machine  (default; use this on every new machine after the first)"
+        echo "    [2] No  — create ${GH_USER}/${DOTFILES_REPO_NAME} from the template ${DOTFILES_TEMPLATE_OWNER}/${DOTFILES_TEMPLATE_NAME}  (one-time, the very first time you ever run bootstrap)"
+        echo "    [s] Skip dotfiles entirely on this machine"
         prompt "Choice [1]: "
         local choice=""
         read -r choice < /dev/tty || choice=""
