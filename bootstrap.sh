@@ -9,8 +9,8 @@ set -euo pipefail
 # (The README has a copy-pasteable snippet that resolves <gh-user> automatically.)
 #
 # What it does, depending on state:
-#   - Fresh machine: walks you through identity setup + dotfiles (clone existing
-#     OR create a new private dotfiles-<your-username> from dotfiles-template)
+#   - Fresh machine: walks you through identity setup + dotfiles (clones the
+#     existing dotfiles-<your-username> private repo onto the machine)
 #   - Inside an empty project folder: per-project setup (deploy key + git
 #     wiring + dev tooling install)
 #   - Anywhere else: menu
@@ -20,9 +20,7 @@ set -euo pipefail
 # ============================================================================
 
 # ----- Constants ------------------------------------------------------------
-DOTFILES_TEMPLATE_OWNER="${DOTFILES_TEMPLATE_OWNER:-amin-lakhani}"
-DOTFILES_TEMPLATE_NAME="${DOTFILES_TEMPLATE_NAME:-dotfiles-template}"
-DEFAULT_WORK_DIR="${BOOTSTRAP_WORK_DIR:-dev_env_setup}"
+DEFAULT_WORK_DIR="${BOOTSTRAP_WORK_DIR:-bootstrap}"
 # Default base under $HOME for new per-project setups. Override via env var.
 DEFAULT_CODE_DIR="${BOOTSTRAP_CODE_DIR:-${HOME}/dev_code}"
 
@@ -440,7 +438,7 @@ setup_dotfiles_ssh_key() {
 # Clone an existing user's dotfiles repo (private, needs SSH deploy key).
 # Returns 0 on success, with DOTFILES_PATH set to the local checkout.
 ensure_dotfiles_clone_existing() {
-    local target="$1"   # local dest dir, e.g. ~/dev_env_setup/dotfiles-jane-doe
+    local target="$1"   # local dest dir, e.g. ~/bootstrap/dotfiles-jane-doe
     local repo_full="${GH_USER}/${DOTFILES_REPO_NAME}"
     local alias="github.com-${DOTFILES_REPO_NAME}"
     local ssh_url="git@${alias}:${repo_full}.git"
@@ -457,59 +455,6 @@ ensure_dotfiles_clone_existing() {
 
     info "Cloning ${repo_full} via SSH alias..."
     git clone "$ssh_url" "$target"
-    success "Cloned to ${target}"
-    return 0
-}
-
-# Create a new private dotfiles-<user> repo from the dotfiles-template,
-# then clone it. Requires gh (with auth) or a browser walk-through.
-ensure_dotfiles_from_template() {
-    local target="$1"
-    local repo_full="${GH_USER}/${DOTFILES_REPO_NAME}"
-    local template_full="${DOTFILES_TEMPLATE_OWNER}/${DOTFILES_TEMPLATE_NAME}"
-
-    if [[ -d "${target}/.git" ]]; then
-        success "Already cloned at ${target}"
-        return 0
-    fi
-
-    # Step 1: create the repo from template
-    if (( GH_AUTH_ACTIVE == 1 )); then
-        info "Creating ${repo_full} from template ${template_full} via gh..."
-        if gh repo create "$repo_full" --private --template "$template_full" 2>&1; then
-            success "Repo created."
-        else
-            warn "gh repo create failed (does ${repo_full} already exist?). Trying browser flow."
-        fi
-    fi
-
-    # Verify the repo exists before proceeding (handles both gh-success and pre-existing cases)
-    local check_url="https://github.com/${repo_full}"
-
-    # If still not there, walk through browser
-    if ! curl -fsI "$check_url" &>/dev/null; then
-        local generate_url="https://github.com/${template_full}/generate?owner=${GH_USER}&name=${DOTFILES_REPO_NAME}&visibility=private"
-        echo ""
-        warn "Open this URL to create ${repo_full} from the template:"
-        boxed_print "URL" "$generate_url"
-        open_url "$generate_url" || true
-        echo "  Settings on the page:"
-        echo "    Owner:      ${GH_USER}"
-        echo "    Repository: ${DOTFILES_REPO_NAME}"
-        echo "    Visibility: ${BOLD}Private${NC}"
-        echo "    Include all branches: leave unchecked"
-        echo ""
-        read -r -p "Press Enter once you've clicked 'Create repository from template': " _ < /dev/tty || true
-    fi
-
-    # Step 2: deploy key + clone
-    if ! setup_dotfiles_ssh_key "$repo_full" "github.com-${DOTFILES_REPO_NAME}"; then
-        warn "Could not enable SSH access to ${repo_full}."
-        return 1
-    fi
-
-    info "Cloning ${repo_full} via SSH alias..."
-    git clone "git@github.com-${DOTFILES_REPO_NAME}:${repo_full}.git" "$target"
     success "Cloned to ${target}"
     return 0
 }
@@ -536,20 +481,19 @@ setup_dotfiles() {
         success "Dotfiles already at ${DOTFILES_PATH}"
         update_dotfiles_checkout "$DOTFILES_PATH"
     else
-        # Need to set up — prompt
+        # Need to set up. The workdir base is ${HOME}/${DEFAULT_WORK_DIR}.
+        # No legacy-name fallbacks (e.g. ~/dev_env_setup, ~/development) —
+        # silent fallthrough was the bug class the May 2026 simplification
+        # removed; any stale path will fail loudly instead of masquerading
+        # as a working workdir.
         local work_dir="${HOME}/${DEFAULT_WORK_DIR}"
-        # Use existing workdir if present (don't surprise the user with a new one)
-        for candidate in "${HOME}/${DEFAULT_WORK_DIR}" "${HOME}/development"; do
-            if [[ -d "$candidate" ]]; then work_dir="$candidate"; break; fi
-        done
         mkdir -p "$work_dir"
         local target="${work_dir}/${DOTFILES_REPO_NAME}"
 
         echo ""
         info "No dotfiles checkout found on this machine."
-        echo "  Does a dotfiles repo already exist on GitHub under your account?"
-        echo "    [1] Yes — clone ${GH_USER}/${DOTFILES_REPO_NAME} onto this machine  (default; use this on every new machine after the first)"
-        echo "    [2] No  — create ${GH_USER}/${DOTFILES_REPO_NAME} from the template ${DOTFILES_TEMPLATE_OWNER}/${DOTFILES_TEMPLATE_NAME}  (one-time, the very first time you ever run bootstrap)"
+        echo "  Clone your existing ${GH_USER}/${DOTFILES_REPO_NAME} repo from GitHub onto this machine?"
+        echo "    [1] Yes  (default — use this on every machine)"
         echo "    [s] Skip dotfiles entirely on this machine"
         prompt "Choice [1]: "
         local choice=""
@@ -561,12 +505,6 @@ setup_dotfiles() {
                 # gh auth lets us register the deploy key without the browser walk
                 ensure_gh_auth || true
                 if ensure_dotfiles_clone_existing "$target"; then
-                    DOTFILES_PATH="$target"
-                fi
-                ;;
-            2)
-                ensure_gh_auth || true
-                if ensure_dotfiles_from_template "$target"; then
                     DOTFILES_PATH="$target"
                 fi
                 ;;
@@ -583,49 +521,7 @@ setup_dotfiles() {
         info "Running ${DOTFILES_PATH}/install.sh"
         bash "${DOTFILES_PATH}/install.sh"
         update_cache_field "CACHED_DOTFILES_PATH" "$DOTFILES_PATH"
-        wire_claude_memory_symlink "$DOTFILES_PATH"
     fi
-}
-
-# Create the symlink Claude Code uses to pick up the synced memory files.
-# Claude reads memory from ~/.claude/projects/<hashed-workdir>/memory/ where
-# the hash is the absolute workdir path with `/` AND `_` both mapped to `-`
-# (verified empirically — Claude Code normalizes underscores too, so a workdir
-# like ~/dev_env_setup encodes to -home-<user>-dev-env-setup, not
-# -home-<user>-dev_env_setup). The dotfiles repo carries the memory files in
-# claude-memory-bootstrap/; this symlink wires them together so a fresh
-# machine sees the synced memories on first claude-code run.
-wire_claude_memory_symlink() {
-    local dotfiles_path="$1"
-    local memory_src="${dotfiles_path}/claude-memory-bootstrap"
-    if [[ ! -d "$memory_src" ]]; then
-        debug "No claude-memory-bootstrap/ dir in ${dotfiles_path} — skipping memory symlink"
-        return 0
-    fi
-    # workdir is dotfiles' parent (e.g. ~/dev_env_setup for ~/dev_env_setup/dotfiles-amin-lakhani)
-    local workdir
-    workdir="$(dirname "$dotfiles_path")"
-    local hash
-    hash="$(echo "$workdir" | sed 's|/|-|g; s|_|-|g')"
-    local claude_dir="${HOME}/.claude/projects/${hash}"
-    local memory_link="${claude_dir}/memory"
-    mkdir -p "$claude_dir"
-    if [[ -L "$memory_link" ]]; then
-        local current
-        current="$(readlink -f "$memory_link" 2>/dev/null || true)"
-        if [[ "$current" == "$memory_src" ]]; then
-            info "Claude memory symlink already correct — skipping"
-            return 0
-        fi
-        info "Refreshing Claude memory symlink target"
-        rm "$memory_link"
-    elif [[ -e "$memory_link" ]]; then
-        local backup="${memory_link}.backup.$(date +%Y%m%d%H%M%S)"
-        warn "Existing ${memory_link} is not a symlink — backing up to ${backup}"
-        mv "$memory_link" "$backup"
-    fi
-    ln -s "$memory_src" "$memory_link"
-    success "Claude memory: ${memory_link} → ${memory_src}"
 }
 
 # ============================================================================
