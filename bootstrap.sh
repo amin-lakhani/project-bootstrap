@@ -192,11 +192,11 @@ load_or_prompt_identity() {
         detected="$(detect_github_username || true)"
         if [[ -n "$detected" ]]; then
             prompt "GitHub username [Enter for ${detected}]:"
-            read -r GH_USER < /dev/tty
+            read -r GH_USER < /dev/tty || GH_USER=""
             GH_USER="${GH_USER:-$detected}"
         else
             prompt "GitHub username:"
-            read -r GH_USER < /dev/tty
+            read -r GH_USER < /dev/tty || { error "No GitHub username provided — aborting."; exit 1; }
         fi
     fi
 
@@ -209,7 +209,7 @@ load_or_prompt_identity() {
         else
             warn "Couldn't fetch from api.github.com (offline / typo / rate limit)."
             prompt "GitHub numeric user ID (find at https://api.github.com/users/${GH_USER}):"
-            read -r GH_USER_ID < /dev/tty
+            read -r GH_USER_ID < /dev/tty || { error "No GitHub user ID provided — aborting."; exit 1; }
         fi
     fi
 
@@ -219,11 +219,11 @@ load_or_prompt_identity() {
         detected="$(detect_git_author_name || true)"
         if [[ -n "$detected" ]]; then
             prompt "Git author name [Enter for ${detected}]:"
-            read -r GIT_NAME < /dev/tty
+            read -r GIT_NAME < /dev/tty || GIT_NAME=""
             GIT_NAME="${GIT_NAME:-$detected}"
         else
             prompt "Git author name (e.g. 'Jane Doe'):"
-            read -r GIT_NAME < /dev/tty
+            read -r GIT_NAME < /dev/tty || { error "No git author name provided — aborting."; exit 1; }
         fi
     fi
 
@@ -303,7 +303,7 @@ ensure_gh_auth() {
     info "Logging in to GitHub via gh CLI for repo creation + deploy-key registration."
     info "The local credential will be REMOVED from this machine when the script exits."
     info "(The OAuth grant on GitHub itself you'll need to revoke manually — script will open the page at the end.)"
-    if ! gh auth login --hostname github.com --git-protocol https; then
+    if ! gh auth login --hostname github.com --git-protocol https --scopes admin:public_key; then
         warn "gh auth login failed or was cancelled. Falling back to browser flow."
         return 1
     fi
@@ -332,7 +332,12 @@ test_dotfiles_ssh() {
         -o BatchMode=yes \
         "git@${alias}" < /dev/null 2>&1 || true)"
     debug "test_dotfiles_ssh output: ${output}"
-    echo "$output" | grep -qiE "successfully authenticated|deploy key|does not provide shell access"
+    # NOTE: the SSH banner is necessary-but-not-sufficient — the GitHub
+    # deploy-key banner always contains "successfully authenticated", but a
+    # green banner alone doesn't prove repo access. The real auth gate is the
+    # subsequent git clone. Unified with the per-project test (step 7/9) on
+    # this stricter single-phrase criterion so both flows agree.
+    echo "$output" | grep -qi "successfully authenticated"
 }
 
 # Generate SSH key + add ~/.ssh/config alias + (if gh) auto-register deploy
@@ -454,7 +459,9 @@ ensure_dotfiles_clone_existing() {
     fi
 
     info "Cloning ${repo_full} via SSH alias..."
-    git clone "$ssh_url" "$target"
+    # Self-cleaning: a partial/interrupted clone leaves a broken checkout that
+    # would masquerade as success on the next run. Remove it and fail loudly.
+    git clone "$ssh_url" "$target" || { rm -rf "$target"; warn "Clone of ${repo_full} failed; cleaned up partial checkout."; return 1; }
     success "Cloned to ${target}"
     return 0
 }
@@ -616,7 +623,8 @@ project_setup() {
 
     # 1. OS + tooling
     step "1/9: System packages + Node + Claude Code"
-    sudo apt-get update && sudo apt-get upgrade -y
+    sudo apt-get update || warn "apt-get update had issues — continuing with existing package lists."
+    sudo apt-get upgrade -y || warn "apt-get upgrade had issues — continuing without a full upgrade."
     if ! sudo bash -c 'command -v node && command -v npm' &> /dev/null; then
         info "Installing Node.js LTS via NodeSource..."
         curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash -
@@ -641,7 +649,7 @@ project_setup() {
     local default_repo_url="https://github.com/${GH_USER}/${project_name}"
     echo "Press Enter for ${default_repo_url} or paste a different URL:"
     local repo_url=""
-    read -r -p "URL [Enter for ${default_repo_url}]: " repo_url < /dev/tty
+    read -r -p "URL [Enter for ${default_repo_url}]: " repo_url < /dev/tty || repo_url=""
     repo_url="${repo_url:-$default_repo_url}"
     local repo_user repo_name
     if [[ "$repo_url" =~ github\.com[:/]([^/]+)/([^/.]+)(\.git)?/?$ ]]; then
@@ -655,7 +663,9 @@ project_setup() {
 
     # 4. Per-project SSH deploy key
     step "4/9: Generate per-project SSH key"
-    local key_name="${project_name}_ed25519"
+    # Namespace by owner+repo (not basename(pwd)) so two clones of different
+    # repos that happen to share a folder name don't collide on key/alias.
+    local key_name="${repo_user}-${repo_name}_ed25519"
     local key_path="${HOME}/.ssh/${key_name}"
     mkdir -p "${HOME}/.ssh"
     chmod 700 "${HOME}/.ssh"
@@ -668,7 +678,7 @@ project_setup() {
 
     # 5. SSH config alias
     step "5/9: SSH config alias"
-    local ssh_host_alias="github.com-${project_name}"
+    local ssh_host_alias="github.com-${repo_user}-${repo_name}"
     local ssh_config="${HOME}/.ssh/config"
     touch "$ssh_config"
     chmod 600 "$ssh_config"
@@ -694,11 +704,20 @@ EOF
     # to the browser walk below.
     ensure_gh_auth || true
 
+    # Default read-only (mirrors the dotfiles key). Only request write access
+    # if this machine actually needs to push to the repo.
+    local write_access=0
+    if prompt_yn "Will this machine push to ${repo_user}/${repo_name}?" "N"; then
+        write_access=1
+    fi
+
     if (( GH_AUTH_ACTIVE == 1 )); then
         info "Registering deploy key via gh..."
         local title="$(hostname) - $(date +%Y-%m-%d) - ${project_name}"
-        if gh repo deploy-key add "${key_path}.pub" --repo "${repo_user}/${repo_name}" --title "$title" --allow-write 2>&1; then
-            success "Deploy key registered (read-write)"
+        local allow_write_flag=()
+        (( write_access == 1 )) && allow_write_flag=(--allow-write)
+        if gh repo deploy-key add "${key_path}.pub" --repo "${repo_user}/${repo_name}" --title "$title" "${allow_write_flag[@]}" 2>&1; then
+            (( write_access == 1 )) && success "Deploy key registered (read-write)" || success "Deploy key registered (read-only)"
         else
             warn "gh deploy-key add failed; falling back to browser walk."
             GH_AUTH_ACTIVE=0   # so the fallback fires below
@@ -716,7 +735,11 @@ EOF
         copy_and_report "Public key" "$pubkey"
         echo ""
         echo "  1. Add the deploy key at: ${deploy_keys_url}"
-        echo "     - Paste title + key, CHECK 'Allow write access', click 'Add key'"
+        if (( write_access == 1 )); then
+            echo "     - Paste title + key, CHECK 'Allow write access', click 'Add key'"
+        else
+            echo "     - Paste title + key, leave 'Allow write access' UNCHECKED (read-only), click 'Add key'"
+        fi
         echo "  2. Upload any starter files at: ${repo_page_url}"
         echo ""
         read -r -p "Press Enter once BOTH steps are done... " _ < /dev/tty || true
@@ -768,6 +791,9 @@ EOF
     echo "Next steps:"
     echo "  1. Open in VS Code:               ${next_cmd}"
     echo "  2. In the integrated terminal:    claude"
+    if (( GH_AUTH_ACTIVE == 1 )); then
+        echo -e "  ${RED}${BOLD}3. REVOKE the GitHub CLI OAuth grant: https://github.com/settings/applications (find 'GitHub CLI' → Revoke)${NC}"
+    fi
     echo ""
     if command -v clip.exe &> /dev/null; then
         echo -n "${next_cmd}" | clip.exe 2>/dev/null && info "Step 1 copied to clipboard"
@@ -834,7 +860,28 @@ main() {
             fi
             ;;
         in-project-folder)
-            project_setup
+            # Auto-detected: cwd is >=2 levels under $HOME without .git. If its
+            # parent is the expected code dir or the workdir, proceed straight
+            # to setup. Otherwise this was an unexpected location — gate it
+            # behind an explicit confirmation so we don't run `git init` etc.
+            # against a folder the user didn't intend.
+            local cwd_now parent_now expected_workdir
+            cwd_now="$(pwd)"
+            parent_now="$(dirname "$cwd_now")"
+            expected_workdir="${HOME}/${DEFAULT_WORK_DIR}"
+            if [[ "$parent_now" == "$DEFAULT_CODE_DIR" || "$parent_now" == "$expected_workdir" ]]; then
+                project_setup
+            else
+                echo ""
+                warn "Auto-detected a project folder in an unexpected location:"
+                warn "  ${cwd_now}"
+                warn "  (parent is not ${DEFAULT_CODE_DIR} or ${expected_workdir})"
+                if prompt_yn "Run per-project setup here (${cwd_now})?" "N"; then
+                    project_setup
+                else
+                    info "Skipping project setup. cd into your intended folder and re-run."
+                fi
+            fi
             ;;
         ambiguous)
             echo ""
